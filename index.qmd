@@ -1,0 +1,24 @@
+---
+title: "index"
+format: html
+---
+
+## Project Overview 📈
+
+This project aims to forecast the price of 50 crypto coins using historical daily price data. The analysis covers the entire data science workflow, from data acquisition and cleaning to modeling and evaluation.
+
+Data for this analysis was sourced from **[daniyalatta/top-50-cryptocurrencies-historical2020-2025-1h](https://www.kaggle.com/datasets/daniyalatta/top-50-cryptocurrencies-historical2020-2025-1h). We explore several time series models to identify which one provides the most accurate short-term predictions. The goal is to create a reproducible workflow that can be easily updated with new data.
+
+---
+
+## Analysis Workflow
+
+The project is broken down into several sequential notebooks. You can navigate to any part of the analysis using the links below or the sidebar.
+
+-   **[01 Data Acquisition](./01-data-acquisition.qmd):** Fetching historical price data.
+-   **[02 Data Cleaning](./02-data-cleaning.qmd):** Processing raw data and feature engineering.
+-   **[03 Exploratory Analysis](./03-exploratory-analysis.qmd):** Visualizing trends and patterns.
+-   **[04 Modeling](./04-modeling.qmd):** Building and training forecasting models.
+-   **[05 Results & Summary](./05-results-summary.qmd):** Evaluating model performance and conclusions.
+
+---

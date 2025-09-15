@@ -1,0 +1,11 @@
+.Rproj.user
+.Rhistory
+.RData
+.Ruserdata
+
+/.quarto/
+
+.venv
+50_coins_crypto_1h_data_cryptocompare
+_site
+renv
