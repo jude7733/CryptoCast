@@ -2,4 +2,79 @@
 title: "3-exploratory-analysis"
 format: html
 ---
+# EDA and Visualization
 
+## Load data
+```{r}
+crypto_data <- readRDS("data/crypto_data.rds")
+```
+
+
+## Load lib
+```{r}
+library(tidyverse)
+library(lubridate)
+library(patchwork)
+```
+
+
+## Price and Volume Over Time
+This is the most fundamental time series plot. It shows the price trend and how trading volume corresponds to price changes.
+```{r}
+bitcoin_data <- as.data.frame(crypto_data$BTC) %>%
+  mutate(timestamp = ymd_hms(timestamp))
+
+# Create the plot for Price
+price_plot <- ggplot(bitcoin_data, aes(x = timestamp, y = close)) +
+  geom_line(color = "cyan") +
+  labs(title = "Bitcoin Price Over Time", y = "Closing Price (USD)", x = "") +
+  theme_minimal()
+
+# Create the plot for Volume
+volume_plot <- ggplot(bitcoin_data, aes(x = timestamp, y = volume_from)) +
+  geom_col(fill = "orange", alpha = 0.7) +
+  labs(title = "Bitcoin Trading Volume Over Time", y = "Volume", x = "Date") +
+  theme_minimal()
+
+price_plot / volume_plot
+```
+
+
+## Distribution of Hourly Returns
+Analyzing returns (percentage changes) is often more useful than analyzing raw prices. It helps you understand volatility.
+```{r}
+# Calculate hourly returns
+bitcoin_data <- bitcoin_data %>%
+  arrange(timestamp) %>%
+  mutate(hourly_return = (close - lag(close)) / lag(close))
+
+ggplot(bitcoin_data, aes(x = hourly_return)) +
+  geom_histogram(bins = 100, fill = "lightblue", color = "black", alpha = 0.8) +
+  labs(title = "Distribution of Bitcoin Hourly Returns",
+       x = "Hourly Return",
+       y = "Frequency") +
+  theme_minimal()
+```
+
+
+## Comparing Multiple Cryptocurrencies
+```{r}
+top_cryptos = c('BTC', 'ETH', 'BNB', 'SOL', 'DOGE')
+comparison_data <- crypto_data[top_cryptos] %>%
+  map_dfr(~as.data.frame(.), .id = "crypto_name") %>%
+  mutate(timestamp = ymd_hms(timestamp)) %>%
+  group_by(crypto_name) %>%
+  arrange(timestamp) %>%
+  # Normalize prices to start at 100
+  mutate(normalized_price = 100 * close / first(close)) %>%
+  ungroup()
+
+ggplot(comparison_data, aes(x = timestamp, y = normalized_price, color = crypto_name)) +
+  geom_line() +
+  labs(title = "Normalized Price Comparison",
+       y = "Price (Normalized to 100)",
+       x = "Date",
+       color = "Cryptocurrency") +
+  theme_minimal() +
+  theme(legend.position = "top")
+```

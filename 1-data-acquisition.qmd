@@ -6,8 +6,7 @@ format: html
 
 ## Prerequisites
 ```{r}
-install.packages("tidyverse")
-install.packages("data.table")
+install.packages(c("tidyverse", "data.table", "patchwork", "corrplot"))
 ```
 
 
