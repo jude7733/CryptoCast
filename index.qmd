@@ -15,10 +15,10 @@ Data for this analysis was sourced from **[daniyalatta/top-50-cryptocurrencies-h
 
 The project is broken down into several sequential notebooks. You can navigate to any part of the analysis using the links below or the sidebar.
 
--   **[01 Data Acquisition](./01-data-acquisition.qmd):** Fetching historical price data.
--   **[02 Data Cleaning](./02-data-cleaning.qmd):** Processing raw data and feature engineering.
--   **[03 Exploratory Analysis](./03-exploratory-analysis.qmd):** Visualizing trends and patterns.
--   **[04 Modeling](./04-modeling.qmd):** Building and training forecasting models.
--   **[05 Results & Summary](./05-results-summary.qmd):** Evaluating model performance and conclusions.
+-   **[1 Data Acquisition](./1-data-acquisition.qmd):** Fetching historical price data.
+-   **[2 Data Cleaning](./2-data-cleaning.qmd):** Processing raw data and feature engineering.
+-   **[3 Exploratory Analysis](./3-exploratory-analysis.qmd):** Visualizing trends and patterns.
+-   **[4 Modeling](./4-modeling.qmd):** Building and training forecasting models.
+-   **[5 Results & Summary](./5-results-summary.qmd):** Evaluating model performance and conclusions.
 
 ---

@@ -1,0 +1,45 @@
+---
+title: "1-data-acquisition"
+format: html
+---
+# Data aquisition and setup
+
+## Prerequisites
+```{r}
+install.packages("tidyverse")
+install.packages("data.table")
+```
+
+
+## Dataset downloader using python kaggle
+```{bash}
+uv run kaggle datasets download -d daniyalatta/top-50-cryptocurrencies-historical2020-2025-1h --unzip
+```
+
+
+## Load library
+```{r}
+library(tidyverse)
+library(data.table)
+```
+
+
+## Get a list of all CSV files in the directory and reads each CSV file into the list
+```{r}
+file_paths <- list.files(path = "50_coins_crypto_1h_data_cryptocompare",
+                         pattern = "*.csv",
+                         full.names = TRUE)
+
+crypto_data <- file_paths %>%
+  set_names(str_remove(basename(.), "USDT_1h.csv")) %>% 
+  map(fread)
+```
+
+
+```{r}
+if (!dir.exists("data")) {
+  dir.create("data")
+}
+
+saveRDS(crypto_data, "data/crypto_data.rds")
+```

@@ -5,9 +5,20 @@ website:
   title: "Crypto Cast"
   sidebar:
     contents:
-      - index.qmd
-      - 01-data-acquisition.qmd
-      - 02-data-cleaning.qmd
-      - 03-exploratory-analysis.qmd
-      - 04-modeling.qmd
-      - 05-results-summary.qmd
+        - href: index.qmd
+          text: "Project Overview"
+        - href: 1-data-acquisition.qmd
+          text: "1. Data Acquisition"
+        - href: 2-data-cleaning.qmd
+          text: "2. Data Cleaning"
+        - href: 3-exploratory-analysis.qmd
+          text: "3. Exploratory Analysis"
+        - href: 4-modeling.qmd
+          text: "4. Modeling"
+        - href: 5-results-summary.qmd
+          text: "5. Results & Summary"
+
+format:
+  html:
+    theme: darkly
+    toc: true

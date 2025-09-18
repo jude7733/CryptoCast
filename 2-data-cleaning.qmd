@@ -1,0 +1,50 @@
+---
+title: "2-data-cleaning"
+format: html
+---
+
+# Preprocessing
+
+## Load data
+```{r}
+crypto_data <- readRDS("data/crypto_data.rds")
+```
+
+
+## Sample data
+```{r}
+head(crypto_data$BTC)
+```
+
+
+## Top 10 coins data rows count
+```{r}
+top_cryptos = c('BTC', 'ETH', 'BNB', 'SOL', 'XRP', 'ADA', 'DOGE', 'MATIC', 'DOT', 'FTM')
+
+row_counts <- lapply(crypto_data[top_cryptos], nrow)
+print(row_counts)
+```
+
+
+## Summary of BTC
+```{r}
+  summary(crypto_data$BTC)
+```
+
+
+## Missing values
+```{r}
+library(tidyverse)
+missing_values_summary <- map(crypto_data, ~colSums(is.na(.)))
+
+head(missing_values_summary)
+```
+
+
+## Feature Engineering
+
+
+## Normalize
+
+
+## Train Test Validation split
