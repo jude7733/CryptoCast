@@ -42,9 +42,70 @@ head(missing_values_summary)
 
 
 ## Feature Engineering
+```{r}
+library(keras)
+library(tensorflow)
+library(dplyr)
+library(zoo)
+library(data.table)
+```
+
+```{r}
+feature_engineering <- function(dt) {
+  dt <- copy(dt)
+  
+  dt <- dt[order(timestamp)]
+  
+  # Calculate simple returns
+  dt[, return := (close - shift(close, 1)) / shift(close, 1)]
+  
+  # Volatility as rolling standard deviation of returns (7 periods)
+  dt[, volatility := zoo::rollapply(return, width = 7, FUN = sd, fill = NA, align = "right")]
+  
+  # 7-period moving average of close price
+  dt[, ma_7 := zoo::rollmean(close, k = 7, fill = NA, align = "right")]
+  
+  # Remove rows with NA values caused by rolling operations
+  dt <- dt[complete.cases(dt)]
+  
+  dt[, timestamp := NULL]
+
+  return(dt)
+}
+
+
+crypto_data_fe <- lapply(crypto_data, feature_engineering)
+
+head(crypto_data_fe)
+```
 
 
 ## Normalize
+```{r}
+normalize_features <- function(dt) {
+  cols <- c("open", "high", "low", "close", "volume_from", "volume_to",
+            "return", "volatility", "ma_7")
+
+  for (col in cols) {
+    # Convert to numeric before math operations
+    numeric_col <- as.numeric(dt[[col]])
+    
+    # Handle possible NA coercion and normalize safely
+    min_val <- min(numeric_col, na.rm = TRUE)
+    max_val <- max(numeric_col, na.rm = TRUE)
+    range_val <- max_val - min_val
+    
+    dt[, (col) := (numeric_col - min_val) / range_val]
+  }
+
+  return(dt)
+}
+
+crypto_data_normalized <- lapply(crypto_data_fe, normalize_features)
+
+head(crypto_data_normalized)
+```
 
 
 ## Train Test Validation split
+### Drop timestamp

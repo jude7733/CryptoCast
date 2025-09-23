@@ -6,14 +6,14 @@ format: html
 
 ## Prerequisites
 ```{r}
-install.packages(c("tidyverse", "data.table", "patchwork", "corrplot"))
+install.packages(c("tidyverse", "data.table", "patchwork", "corrplot", "tensorflow", "keras", "zoo"))
 ```
 
 
 ## Dataset downloader using python kaggle
-```{bash}
-uv run kaggle datasets download -d daniyalatta/top-50-cryptocurrencies-historical2020-2025-1h --unzip
-```
+## ```{bash}
+## uv run kaggle datasets download -d daniyalatta/top-50-cryptocurrencies-historical2020-2025-1h --unzip
+## ```
 
 
 ## Load library
