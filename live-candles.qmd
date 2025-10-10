@@ -1,0 +1,69 @@
+---
+title: "live-candles"
+format: html
+---
+
+```{r}
+install.packages(
+  pkgs = 'cryptoQuotes',
+  dependencies = TRUE
+)
+library(cryptoQuotes)
+```
+
+
+```{r}
+BTC_LS <- cryptoQuotes::get_lsratio(
+  ticker   = 'BTCUSDT',
+  source   = 'bybit',
+  interval = '5m',
+  from     = Sys.Date() - 2
+)
+
+cryptoQuotes::chart(
+  ticker = BTC,
+  main   = cryptoQuotes::kline(),
+  sub    = list(
+    cryptoQuotes::lsr(ratio = BTC_LS),
+    cryptoQuotes::volume()
+  ),
+  indicator = list(
+    cryptoQuotes::sma(n = 7),
+    cryptoQuotes::sma(n = 14),
+    cryptoQuotes::sma(n = 21),
+    cryptoQuotes::bollinger_bands()
+  ),
+  options = list(
+    static     = TRUE
+  )
+)
+```
+
+
+
+```{r}
+library(cryptoQuotes)
+library(xts)
+
+ticker_symbol <- 'BTCUSDT'
+exchange_source <- 'binance'
+time_interval <- '1h'
+start_date <- as.Date('2025-10-01')
+
+ohlcv_data <- get_quote(
+  ticker = ticker_symbol,
+  source = exchange_source,
+  interval = time_interval,
+  from = start_date,
+  to = Sys.Date()
+)
+
+print("First 6 rows of the OHLCV data:")
+print(head(ohlcv_data))
+
+print("Last 6 rows of the OHLCV data:")
+print(tail(ohlcv_data))
+
+print(paste("Data object class:", class(ohlcv_data)))
+print(paste("Number of observations:", nrow(ohlcv_data)))
+```
