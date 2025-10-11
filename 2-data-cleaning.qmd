@@ -43,12 +43,10 @@ head(missing_values_summary)
 
 ## Feature Engineering
 ```{r}
-library(keras)
-library(tensorflow)
-library(dplyr)
-library(zoo)
+#library(zoo)
 library(data.table)
 ```
+### Open, High, Low, Adj Close, RSI, EMAF, EMAM, EMAS, Target, TargetClass, TargetNextClose
 
 ```{r}
 feature_engineering <- function(dt) {
@@ -68,8 +66,6 @@ feature_engineering <- function(dt) {
   # Remove rows with NA values caused by rolling operations
   dt <- dt[complete.cases(dt)]
   
-  dt[, timestamp := NULL]
-
   return(dt)
 }
 
@@ -80,32 +76,81 @@ head(crypto_data_fe)
 ```
 
 
-## Normalize
+## Train test split and Normalize
 ```{r}
-normalize_features <- function(dt) {
-  cols <- c("open", "high", "low", "close", "volume_from", "volume_to",
-            "return", "volatility", "ma_7")
+library(data.table)
 
-  for (col in cols) {
-    # Convert to numeric before math operations
-    numeric_col <- as.numeric(dt[[col]])
-    
-    # Handle possible NA coercion and normalize safely
-    min_val <- min(numeric_col, na.rm = TRUE)
-    max_val <- max(numeric_col, na.rm = TRUE)
-    range_val <- max_val - min_val
-    
-    dt[, (col) := (numeric_col - min_val) / range_val]
-  }
+dt <- as.data.table(copy(crypto_data$BTC))
+if (!inherits(dt$timestamp, "POSIXct")) dt[, timestamp := as.POSIXct(timestamp, tz = "UTC")]
+setorder(dt, timestamp)
 
-  return(dt)
-}
+split_time <- as.POSIXct("2024-01-01 00:00:00", tz = "UTC")
 
-crypto_data_normalized <- lapply(crypto_data_fe, normalize_features)
+train_dt <- dt[timestamp < split_time]
+test_dt  <- dt[timestamp >= split_time]
 
-head(crypto_data_normalized)
+feature_cols <- c("open","high","low","volume_from","volume_to")
+target_col   <- "close"
 ```
 
 
-## Train Test Validation split
-### Drop timestamp
+### Fit min-max on training features only
+```{r}
+mins <- train_dt[, lapply(.SD, function(x) min(as.numeric(x), na.rm = TRUE)), .SDcols = feature_cols]
+maxs <- train_dt[, lapply(.SD, function(x) max(as.numeric(x), na.rm = TRUE)), .SDcols = feature_cols]
+ranges <- maxs - mins
+for (j in names(ranges)) if (ranges[[j]] == 0 || is.na(ranges[[j]])) ranges[[j]] <- 1
+```
+
+
+### Apply scaling to train/test
+```{r}
+scale_dt <- function(d, mins, ranges) {
+  d <- copy(d)
+  for (col in feature_cols) {
+    num <- as.numeric(d[[col]])
+    d[, (col) := (num - mins[[col]]) / ranges[[col]]]
+  }
+  d
+}
+
+train_s <- scale_dt(train_dt, mins, ranges)
+test_s  <- scale_dt(test_dt,  mins, ranges)
+
+xtrain <- as.matrix(train_s[, ..feature_cols])
+ytrain <- train_dt[[target_col]]
+xtest  <- as.matrix(test_s[, ..feature_cols])
+ytest  <- test_dt[[target_col]]
+```
+
+
+## Sample cleaned data of BTC
+```{r}
+print("Xtrain")
+head(xtrain)
+print("Xtest")
+head(xtest)
+print("Ytrain")
+head(ytrain)
+print("Ytest")
+head(ytest)
+```
+
+
+## Final row count
+```{r}
+nrow(xtrain)
+nrow(xtest)
+length(ytrain)
+length(ytest)
+```
+
+
+## Save splits
+```{r}
+saveRDS(xtrain, "data/xtrain.rds")
+saveRDS(xtest, "data/xtest.rds")
+saveRDS(ytrain, "data/ytrain.rds")
+saveRDS(ytest, "data/ytest.rds")
+```
+
