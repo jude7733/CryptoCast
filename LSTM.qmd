@@ -1,0 +1,159 @@
+---
+title: "LSTM"
+format: html
+---
+
+# LSTM Price forcast
+
+## Load data
+```{r}
+xtrain <- readRDS("data/xtrain.rds")
+xtest <- readRDS("data/xtest.rds")
+ytrain <- readRDS("data/ytrain.rds")
+ytest <- readRDS("data/ytest.rds")
+```
+
+
+## Install keras
+```{r}
+#install.packages("keras3")
+#keras3::install_keras(backend = "tensorflow")
+```
+
+
+## Preprocess
+```{r}
+n_timesteps <- 24
+n_features <- ncol(xtrain)
+
+train_mean_features <- apply(xtrain, 2, mean)
+train_sd_features <- apply(xtrain, 2, sd)
+
+xtrain_scaled <- scale(xtrain, center = train_mean_features, scale = train_sd_features)
+xtest_scaled <- scale(xtest, center = train_mean_features, scale = train_sd_features)
+
+train_mean_target <- mean(ytrain)
+train_sd_target <- sd(ytrain)
+
+ytrain_scaled <- scale(ytrain, center = train_mean_target, scale = train_sd_target)
+ytest_scaled <- scale(ytest, center = train_mean_target, scale = train_sd_target)
+
+
+make_windows <- function(X, y, n_timesteps) {
+  n <- nrow(X)
+  n_samples <- n - n_timesteps
+  
+  X <- as.matrix(X)
+  
+  x_out <- array(NA_real_, dim = c(n_samples, n_timesteps, ncol(X)))
+  y_out <- numeric(n_samples)
+  
+  for (i in seq_len(n_samples)) {
+    x_out[i, , ] <- X[i:(i + n_timesteps - 1), ]
+    y_out[i] <- y[i + n_timesteps]
+  }
+  
+  list(x = x_out, y = y_out)
+}
+
+train_data <- make_windows(xtrain_scaled, ytrain_scaled, n_timesteps)
+test_data <- make_windows(xtest_scaled, ytest_scaled, n_timesteps)
+
+x_train_final <- train_data$x
+y_train_final <- train_data$y
+x_test_final <- test_data$x
+y_test_final <- test_data$y
+
+cat("Training data dimensions (samples, timesteps, features):", dim(x_train_final), "\n")
+cat("Testing data dimensions (samples, timesteps, features):", dim(x_test_final), "\n")
+```
+
+
+## Model definition
+```{r}
+library("keras3")
+
+inputs <- layer_input(shape = c(n_timesteps, n_features))
+
+outputs <- inputs |>
+  layer_lstm(units = 100, return_sequences = TRUE) |>
+  layer_dropout(rate = 0.2) |>
+  layer_lstm(units = 50) |>
+  layer_dropout(rate = 0.2) |>
+  layer_dense(units = 1)
+
+model <- keras_model(inputs = inputs, outputs = outputs)
+
+summary(model)
+```
+
+
+## Compile
+```{r}
+model |> compile(
+  loss = 'mean_squared_error',
+  optimizer = optimizer_adam(learning_rate = 0.001)
+)
+```
+
+
+## Training
+```{r}
+cat("\n--- Starting Model Training ---\n")
+
+early_stopping <- callback_early_stopping(patience = 10, restore_best_weights = TRUE)
+
+history <- model |> fit(
+  x = x_train_final,
+  y = y_train_final,
+  epochs = 50,
+  batch_size = 64,
+  validation_split = 0.2,
+  verbose = 2,
+  callbacks = list(early_stopping)
+)
+
+cat("--- Training Complete ---\n\n")
+
+plot(history)
+```
+
+
+## Model Evaluation
+```{r}
+n_timesteps <- 24 
+
+test_data <- make_windows(xtest_scaled, ytest_scaled, n_timesteps)
+
+x_test_final <- test_data$x
+y_test_final <- test_data$y 
+
+predictions_scaled <- predict(model, x_test_final)
+
+predictions <- predictions_scaled * train_sd_target + train_mean_target
+
+actual_values <- y_test_final * train_sd_target + train_mean_target
+
+mae <- mean(abs(predictions - actual_values))
+cat(sprintf("Mean Absolute Error on Test Data: $%.2f\n", mae))
+
+rmse <- sqrt(mean((predictions - actual_values)^2))
+cat(sprintf("Root Mean Squared Error on Test Data: $%.2f\n", rmse))
+```
+
+
+## Plotting
+```{r}
+plot_range <- 1:min(500, length(actual_values))
+
+plot(actual_values[plot_range], type = 'l', col = '#0072B2', lwd = 2,
+     main = "Hourly Crypto Price Forecast vs. Actual",
+     ylab = "Close Price ($)", xlab = "Time (Hours)",
+     ylim = range(c(actual_values[plot_range], predictions[plot_range])))
+lines(predictions[plot_range], col = '#D55E00', lwd = 2, lty = 2)
+legend("topright", 
+       legend = c("Actual Price", "LSTM Predicted Price"), 
+       col = c('#0072B2', '#D55E00'), 
+       lty = c(1, 2), lwd = 2, bty = "n")
+```
+
