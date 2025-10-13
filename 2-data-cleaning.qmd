@@ -84,7 +84,7 @@ dt <- as.data.table(copy(crypto_data$BTC))
 if (!inherits(dt$timestamp, "POSIXct")) dt[, timestamp := as.POSIXct(timestamp, tz = "UTC")]
 setorder(dt, timestamp)
 
-split_time <- as.POSIXct("2024-01-01 00:00:00", tz = "UTC")
+split_time <- as.POSIXct("2025-01-01 00:00:00", tz = "UTC")
 
 train_dt <- dt[timestamp < split_time]
 test_dt  <- dt[timestamp >= split_time]

@@ -1,0 +1,102 @@
+---
+title: "Arima"
+format: html
+---
+
+# Arima model forecasting
+
+## Load data
+```{r}
+xtrain <- readRDS("data/xtrain.rds")
+xtest <- readRDS("data/xtest.rds")
+ytrain <- readRDS("data/ytrain.rds")
+ytest <- readRDS("data/ytest.rds")
+crypto_data <- readRDS("data/crypto_data.rds")
+```
+
+
+
+```{r}
+# install.packages("marima", dependencies = TRUE)
+```
+
+```{r}
+dim(xtrain)
+```
+
+```{r}
+library(marima)
+
+# Convert to matrix format
+train_data <- as.matrix(cbind(xtrain, close = ytrain))
+test_data <- as.matrix(cbind(xtest, close = ytest))
+
+# Define a more reasonable model structure
+model_def <- define.model(kvar = 6,           # 6 variables
+                         ar = c(1, 2),        # AR lags at 1 and 2
+                         ma = c(1),           # MA lag at 1
+                         reg.var = c(1:5))    # First 5 vars as predictors for close
+
+# Fit the model using the defined patterns
+fit <- marima(train_data, 
+              ar.pattern = model_def$ar.pattern, 
+              ma.pattern = model_def$ma.pattern,
+              Plot = "none")
+```
+
+```{r}
+full_series <- rbind(train_data, test_data)
+
+nstart <- nrow(train_data)  # Starting point for forecasting
+nstep <- nrow(test_data)    # Number of steps to forecast
+
+forecast_result <- arma.forecast(series = full_series,
+                                marima = fit,
+                                nstart = nstart,
+                                nstep = nstep)
+
+# Extract forecasted values
+forecasted_prices <- forecast_result$forecasts[6, (nstart+1):(nstart+nstep)]  # 6th column = close price
+actual_prices <- test_data[, 6]  # Actual close prices from test set
+```
+
+
+```{r}
+head(actual_prices)
+head(forecasted_prices)
+```
+
+
+```{r}
+# Inspect structure
+str(forecast_result)
+
+# Suppose variances are in forecast_result$prediction.variances[[1]]
+# Convert to numeric array
+var_array <- forecast_result$prediction.variances
+if (is.list(var_array)) {
+  var_array <- var_array[[1]]
+}
+
+# Now extract the variances for the 6th series across steps
+# Ensure it’s numeric
+pred_var <- as.numeric(var_array[6, 6, 1:nstep])
+
+# Compute standard deviations
+pred_std <- sqrt(pred_var)
+
+# 95% CI bounds
+upper_bound <- forecasted_prices + 1.96 * pred_std
+lower_bound <- forecasted_prices - 1.96 * pred_std
+
+# Plot with correct numeric bounds
+plot(actual_prices, type = "l", col = "blue", 
+     main = "MARIMA Price Forecast with CI",
+     ylab = "Price", xlab = "Time")
+lines(forecasted_prices, col = "red")
+lines(upper_bound, col = "gray", lty = 2)
+lines(lower_bound, col = "gray", lty = 2)
+legend("topright", legend = c("Actual","Forecast","95% CI"),
+       col = c("blue","red","gray"), lty = c(1,1,2))
+```
+
