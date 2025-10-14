@@ -41,116 +41,116 @@ head(missing_values_summary)
 ```
 
 
-## Feature Engineering
+## Sort by timestamp
 ```{r}
-#library(zoo)
-library(data.table)
+sort_by_time <- function(df) {
+  df %>%
+    arrange(timestamp)
+}
+
+crypto_data <- map(crypto_data, sort_by_time)
 ```
+
+
+## Feature Engineering
 ### Open, High, Low, Adj Close, RSI, EMAF, EMAM, EMAS, Target, TargetClass, TargetNextClose
 
+### Add lag of close by 1 step, moving avg and volatility of 10 hours
 ```{r}
-feature_engineering <- function(dt) {
-  dt <- copy(dt)
+library(dplyr)
+library(zoo)
+
+add_features <- function(df) {
+  df %>%
+    mutate(
+      close_lag_1 = lag(close),
+      ma_10 = rollmean(close, k = 10, fill = NA, align = "right"),
+      volatility_10 = rollapply(close, width = 10, FUN = sd, fill = NA, align = "right")
+      ) %>%
+    na.omit()
+}
+```
+
+
+## Add new features and extract feature columns
+```{r}
+feature_engineered_list <- map(crypto_data, add_features)
+
+head(feature_engineered_list)
+```
+
+
+## Scale features
+```{r}
+scale_features <- function(df) {
   
-  dt <- dt[order(timestamp)]
+  cols_to_scale <- c("open", "high", "low", "volume_from", "volume_to", 
+                     "close_lag_1", "ma_10", "volatility_10")
   
-  # Calculate simple returns
-  dt[, return := (close - shift(close, 1)) / shift(close, 1)]
+  scaled_df <- df %>%
+    mutate(across(all_of(cols_to_scale), ~ (.x - min(.x)) / (max(.x) - min(.x))))
   
-  # Volatility as rolling standard deviation of returns (7 periods)
-  dt[, volatility := zoo::rollapply(return, width = 7, FUN = sd, fill = NA, align = "right")]
-  
-  # 7-period moving average of close price
-  dt[, ma_7 := zoo::rollmean(close, k = 7, fill = NA, align = "right")]
-  
-  # Remove rows with NA values caused by rolling operations
-  dt <- dt[complete.cases(dt)]
-  
-  return(dt)
+  return(scaled_df)
 }
 
-
-crypto_data_fe <- lapply(crypto_data, feature_engineering)
-
-head(crypto_data_fe)
+final_data <- map(feature_engineered_list, scale_features)
+head(final_data)
 ```
+Note fields are 0 because their value was 0 or not coin isn't invented yet!
 
 
-## Train test split and Normalize
+## Split by timestamp
 ```{r}
-library(data.table)
-
-dt <- as.data.table(copy(crypto_data$BTC))
-if (!inherits(dt$timestamp, "POSIXct")) dt[, timestamp := as.POSIXct(timestamp, tz = "UTC")]
-setorder(dt, timestamp)
-
-split_time <- as.POSIXct("2025-01-01 00:00:00", tz = "UTC")
-
-train_dt <- dt[timestamp < split_time]
-test_dt  <- dt[timestamp >= split_time]
-
-feature_cols <- c("open","high","low","volume_from","volume_to")
-target_col   <- "close"
-```
-
-
-### Fit min-max on training features only
-```{r}
-mins <- train_dt[, lapply(.SD, function(x) min(as.numeric(x), na.rm = TRUE)), .SDcols = feature_cols]
-maxs <- train_dt[, lapply(.SD, function(x) max(as.numeric(x), na.rm = TRUE)), .SDcols = feature_cols]
-ranges <- maxs - mins
-for (j in names(ranges)) if (ranges[[j]] == 0 || is.na(ranges[[j]])) ranges[[j]] <- 1
-```
-
-
-### Apply scaling to train/test
-```{r}
-scale_dt <- function(d, mins, ranges) {
-  d <- copy(d)
-  for (col in feature_cols) {
-    num <- as.numeric(d[[col]])
-    d[, (col) := (num - mins[[col]]) / ranges[[col]]]
-  }
-  d
+create_train_set <- function(df) {
+  df %>%
+    filter(timestamp < as.POSIXct("2025-01-01"))
 }
 
-train_s <- scale_dt(train_dt, mins, ranges)
-test_s  <- scale_dt(test_dt,  mins, ranges)
+create_test_set <- function(df) {
+  df %>%
+    filter(timestamp >= as.POSIXct("2025-01-01"))
+}
 
-xtrain <- as.matrix(train_s[, ..feature_cols])
-ytrain <- train_dt[[target_col]]
-xtest  <- as.matrix(test_s[, ..feature_cols])
-ytest  <- test_dt[[target_col]]
+train_data <- map(final_data, create_train_set)
+test_data <- map(final_data, create_test_set)
+
+head(test_data)
 ```
 
 
-## Sample cleaned data of BTC
+## Create feature and target sets
 ```{r}
-print("Xtrain")
-head(xtrain)
-print("Xtest")
-head(xtest)
-print("Ytrain")
-head(ytrain)
-print("Ytest")
-head(ytest)
+create_feature_set <- function(df) {
+  df %>%
+    select(-close, -timestamp)
+}
+
+create_target_set <- function(df) {
+  df %>%
+    select(close)
+}
+
+xtrain_list <- map(train_data, create_feature_set)
+ytrain_list <- map(train_data, create_target_set)
+xtest_list <- map(test_data, create_feature_set)
+ytest_list <- map(test_data, create_target_set)
 ```
 
 
-## Final row count
+
+## Final rows of BTC
 ```{r}
-nrow(xtrain)
-nrow(xtest)
-length(ytrain)
-length(ytest)
+nrow(xtrain_list$BTC)
+nrow(xtest_list$BTC)
+nrow(ytrain_list$BTC)
+nrow(ytest_list$BTC)
 ```
 
 
 ## Save splits
 ```{r}
-saveRDS(xtrain, "data/xtrain.rds")
-saveRDS(xtest, "data/xtest.rds")
-saveRDS(ytrain, "data/ytrain.rds")
-saveRDS(ytest, "data/ytest.rds")
+saveRDS(xtrain_list, "data/xtrain_list.rds")
+saveRDS(xtest_list, "data/xtest_list.rds")
+saveRDS(ytrain_list, "data/ytrain_list.rds")
+saveRDS(ytest_list, "data/ytest_list.rds")
 ```
-

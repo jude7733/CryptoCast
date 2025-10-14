@@ -10,3 +10,5 @@
 _site
 data
 .RDataTmp*
+arima_files
+arima.rmarkdown
