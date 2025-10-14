@@ -101,7 +101,7 @@ model |> compile(
 ```{r}
 cat("\n--- Starting Model Training ---\n")
 
-early_stopping <- callback_early_stopping(patience = 10, restore_best_weights = TRUE)
+early_stopping <- callback_early_stopping(patience = 5, restore_best_weights = TRUE)
 
 history <- model |> fit(
   x = x_train_final,
@@ -121,12 +121,12 @@ plot(history)
 
 ## Model Evaluation
 ```{r}
-n_timesteps <- 24 
+n_timesteps <- 24
 
 test_data <- make_windows(xtest_scaled, ytest_scaled, n_timesteps)
 
 x_test_final <- test_data$x
-y_test_final <- test_data$y 
+y_test_final <- test_data$y
 
 predictions_scaled <- predict(model, x_test_final)
 
@@ -139,6 +139,13 @@ cat(sprintf("Mean Absolute Error on Test Data: $%.2f\n", mae))
 
 rmse <- sqrt(mean((predictions - actual_values)^2))
 cat(sprintf("Root Mean Squared Error on Test Data: $%.2f\n", rmse))
+```
+
+
+## Predictions
+```{r}
+head(predictions_scaled)
+head(y_test_final)
 ```
 
 
