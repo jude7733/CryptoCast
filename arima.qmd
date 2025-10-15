@@ -7,12 +7,36 @@ format: html
 
 ## Load data
 ```{r}
-xtrain <- readRDS("data/xtrain.rds")
-xtest <- readRDS("data/xtest.rds")
-ytrain <- readRDS("data/ytrain.rds")
-ytest <- readRDS("data/ytest.rds")
-crypto_data <- readRDS("data/crypto_data.rds")
+xtrain_list <- readRDS("data/xtrain_list.rds")
+xtest_list <- readRDS("data/xtest_list.rds")
+ytrain_list <- readRDS("data/ytrain_list.rds")
+ytest_list <- readRDS("data/ytest_list.rds")
+crypto_data_list <- readRDS("data/crypto_data.rds")
 ```
+
+# Arima
+
+## Install packages
+```{r}
+install.packages("forecast", dependencies = TRUE)
+```
+
+
+## Prepare data for BTC
+```{r}
+library(forecast)
+
+btc_ytain <- ytrain_list$BTC
+btc_ts <- ts(btc_ytain$close, frequency = 24)
+```
+
+
+## Arima model for BTC
+```{r}
+arima_model <- auto.arima(btc_ts)
+summary(arima_model)
+```
+
 
 # Marima forcasting
 
@@ -32,6 +56,11 @@ dim(xtest)
 ## Training
 ```{r}
 library(marima)
+
+xtrain <- xtrain_list$BTC
+xtest <- xtest_list$BTC
+ytrain <- ytrain_list$BTC
+ytest <- ytest_list$BTC
 
 train_data <- as.matrix(cbind(xtrain, close = ytrain))
 test_data <- as.matrix(cbind(xtest, close = ytest))

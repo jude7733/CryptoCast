@@ -136,8 +136,7 @@ xtest_list <- map(test_data, create_feature_set)
 ytest_list <- map(test_data, create_target_set)
 ```
 
-
-
+  
 ## Final rows of BTC
 ```{r}
 nrow(xtrain_list$BTC)
