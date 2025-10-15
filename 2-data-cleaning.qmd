@@ -28,15 +28,15 @@ print(row_counts)
 
 ## Summary of BTC
 ```{r}
-  summary(crypto_data$BTC)
+summary(crypto_data$BTC)
 ```
 
 
 ## Missing values
 ```{r}
 library(tidyverse)
-missing_values_summary <- map(crypto_data, ~colSums(is.na(.)))
 
+missing_values_summary <- map(crypto_data, ~colSums(is.na(.)))
 head(missing_values_summary)
 ```
 

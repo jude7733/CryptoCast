@@ -1,0 +1,105 @@
+---
+title: "marima"
+format: html
+---
+
+# Marima forcasting
+
+## Install Marima
+```{r}
+# install.packages("marima", dependencies = TRUE)
+```
+
+
+## Data dim
+```{r}
+dim(xtrain)
+dim(xtest)
+```
+
+
+## Training
+```{r}
+library(marima)
+
+xtrain <- xtrain_list$BTC
+xtest <- xtest_list$BTC
+ytrain <- ytrain_list$BTC
+ytest <- ytest_list$BTC
+
+train_data <- as.matrix(cbind(xtrain, close = ytrain))
+test_data <- as.matrix(cbind(xtest, close = ytest))
+
+model_def <- define.model(kvar = 6,
+                         ar = c(1, 2),        # AR lags at 1 and 2
+                         ma = c(1),           # MA lag at 1
+                         reg.var = c(1:5))    # Predictors for close
+
+fit <- marima(train_data, 
+              ar.pattern = model_def$ar.pattern, 
+              ma.pattern = model_def$ma.pattern,
+              Plot = "none")
+```
+
+
+## Forecasting
+```{r}
+full_series <- rbind(train_data, test_data)
+
+nstart <- nrow(train_data)
+nstep <- nrow(test_data)
+
+forecast_result <- arma.forecast(series = full_series,
+                                marima = fit,
+                                nstart = nstart,
+                                nstep = nstep)
+
+# Extract forecasted values
+forecasted_prices <- forecast_result$forecasts[6, (nstart+1):(nstart+nstep)]
+actual_prices <- test_data[, 6]
+```
+
+
+## Values
+```{r}
+head(actual_prices)
+head(forecasted_prices)
+```
+
+
+## Evaluation
+```{r}
+mae <- mean(abs(forecasted_prices - actual_prices))
+cat(sprintf("Mean Absolute Error on Test Data: $%.2f\n", mae))
+
+rmse <- sqrt(mean((forecasted_prices - actual_prices)^2))
+cat(sprintf("Root Mean Squared Error on Test Data: $%.2f\n", rmse))
+```
+
+
+## Plot
+```{r}
+str(forecast_result)
+
+var_array <- forecast_result$prediction.variances
+if (is.list(var_array)) {
+  var_array <- var_array[[1]]
+}
+
+pred_var <- as.numeric(var_array[6, 6, 1:nstep])
+
+pred_std <- sqrt(pred_var)
+
+# 95% CI bounds
+upper_bound <- forecasted_prices + 1.96 * pred_std
+lower_bound <- forecasted_prices - 1.96 * pred_std
+
+plot(actual_prices, type = "l", col = "blue", 
+     main = "MARIMA Price Forecast with CI",
+     ylab = "Price", xlab = "Time")
+lines(forecasted_prices, col = "red")
+lines(upper_bound, col = "gray", lty = 2)
+lines(lower_bound, col = "gray", lty = 2)
+legend("topright", legend = c("Actual","Forecast","95% CI"),
+       col = c("blue","red","gray"), lty = c(2,1,3))
+```
