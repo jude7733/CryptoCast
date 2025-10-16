@@ -5,16 +5,129 @@ format: html
 
 # Marima forcasting
 
+## Load data
+```{r}
+xtrain_list <- readRDS("data/xtrain_list.rds")
+xtest_list <- readRDS("data/xtest_list.rds")
+ytrain_list <- readRDS("data/ytrain_list.rds")
+ytest_list <- readRDS("data/ytest_list.rds")
+crypto_data_list <- readRDS("data/crypto_data.rds")
+```
+
+
 ## Install Marima
 ```{r}
-# install.packages("marima", dependencies = TRUE)
+#install.packages("marima", dependencies = TRUE)
+library(marima)
+library(dplyr)
 ```
 
 
 ## Data dim
 ```{r}
-dim(xtrain)
-dim(xtest)
+dim(xtrain_list$BTC)
+dim(xtest_list$BTC)
+```
+
+
+## Sample data
+```{r}
+head(xtrain_list$BTC)
+```
+
+
+## Training function
+```{r}
+train_marima_model <- function(coin_name, xtrain_list, ytrain_list) {
+  xtrain <- xtrain_list[[coin_name]]
+  ytrain <- ytrain_list[[coin_name]]
+  
+  train_data <- bind_cols(xtrain, ytrain)
+  
+  model_structure <- define.model(kvar = ncol(train_data),
+                                  ar = c(1, 2),
+                                  ma = c(1),
+                                  reg.var = c(1:8))
+  
+  marima_model <- marima(train_data,
+                         ar.pattern = model_structure$ar.pattern,
+                         ma.pattern = model_structure$ma.pattern
+  )
+  
+  return(marima_model)
+}
+```
+
+
+## BTC model
+```{r}
+btc_model <- train_marima_model("BTC", xtrain_list, ytrain_list)
+summary(btc_model)
+```
+
+
+## Predict
+```{r}
+library(marima)
+
+predict_with_marima <- function(coin_symbol, marima_model, xtrain_list, ytrain_list, xtest_list, ytest_list) {
+  xtrain <- xtrain_list[[coin_symbol]]
+  xtest <- xtest_list[[coin_symbol]]
+  ytrain <- ytrain_list[[coin_symbol]]
+  ytest <- ytest_list[[coin_symbol]]
+  
+  # Combine training data with known predictor variables for the forecast horizon
+  full_series <- rbind(
+    as.matrix(cbind(xtrain, close = ytrain)),
+    as.matrix(cbind(xtest, close = rep(NA, nrow(xtest))))
+  )
+  
+  nstart <- nrow(xtrain) + 1
+  nstep <- nrow(xtest)
+  
+  forecast_result <- arma.forecast(series = full_series,
+                                   marima = marima_model,
+                                   nstart = nstart - 1,
+                                   nstep = nstep)
+  
+  print(dim(forecast_result$forecasts))
+  
+  forecasted_prices <- forecast_result$forecasts[1, 1:nstep]
+  
+  return(forecasted_prices)
+}
+
+```
+
+
+## Predict for Bitcoin
+```{r}
+btc_marima_forecast <- predict_with_marima("BTC", 
+                                           btc_model,
+                                           xtrain_list,
+                                           ytrain_list,
+                                           xtest_list,
+                                           ytest_list)
+
+#head(btc_marima_forecast)
+```
+
+## Evaluation function RMSE
+```{r}
+calculate_rmse <- function(actual_values, predicted_values) {
+  mse <- mean((actual_values - predicted_values)^2)
+  rmse <- sqrt(mse)
+  
+  return(rmse)
+}
+```
+
+
+## Evaluation
+```{r}
+actual_values <- ytest_list$BTC$close
+marima_rmse <- calculate_rmse(actual_values, btc_marima_forecast)
+cat(sprintf("Root Mean Squared Error on Test Data: $%.2f\n", marima_rmse))
 ```
 
 
@@ -30,10 +143,10 @@ ytest <- ytest_list$BTC
 train_data <- as.matrix(cbind(xtrain, close = ytrain))
 test_data <- as.matrix(cbind(xtest, close = ytest))
 
-model_def <- define.model(kvar = 6,
+model_def <- define.model(kvar = 9,
                          ar = c(1, 2),        # AR lags at 1 and 2
                          ma = c(1),           # MA lag at 1
-                         reg.var = c(1:5))    # Predictors for close
+                         reg.var = c(1:8))    # Predictors for close
 
 fit <- marima(train_data, 
               ar.pattern = model_def$ar.pattern, 
@@ -55,8 +168,8 @@ forecast_result <- arma.forecast(series = full_series,
                                 nstep = nstep)
 
 # Extract forecasted values
-forecasted_prices <- forecast_result$forecasts[6, (nstart+1):(nstart+nstep)]
-actual_prices <- test_data[, 6]
+forecasted_prices <- forecast_result$forecasts[9, (nstart+1):(nstart+nstep)]
+actual_prices <- test_data[, 9]
 ```
 
 
@@ -64,6 +177,8 @@ actual_prices <- test_data[, 6]
 ```{r}
 head(actual_prices)
 head(forecasted_prices)
+length(actual_prices)
+length(forecasted_prices)
 ```
 
 
@@ -101,5 +216,5 @@ lines(forecasted_prices, col = "red")
 lines(upper_bound, col = "gray", lty = 2)
 lines(lower_bound, col = "gray", lty = 2)
 legend("topright", legend = c("Actual","Forecast","95% CI"),
-       col = c("blue","red","gray"), lty = c(2,1,3))
+       col = c("blue","red","gray"), lty = c(1,1,3))
 ```
