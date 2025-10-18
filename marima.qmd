@@ -82,21 +82,20 @@ predict_with_marima <- function(coin_symbol, marima_model, xtrain_list, ytrain_l
     as.matrix(cbind(xtest, close = rep(NA, nrow(xtest))))
   )
   
-  nstart <- nrow(xtrain) + 1
+  nstart <- nrow(xtrain)
   nstep <- nrow(xtest)
   
   forecast_result <- arma.forecast(series = full_series,
                                    marima = marima_model,
-                                   nstart = nstart - 1,
+                                   nstart = nstart,
                                    nstep = nstep)
   
   print(dim(forecast_result$forecasts))
   
-  forecasted_prices <- forecast_result$forecasts[1, 1:nstep]
+  forecasted_prices <- forecast_result$forecasts[9, (nstart+1):(nstart+nstep)]
   
   return(forecasted_prices)
 }
-
 ```
 
 
@@ -111,6 +110,14 @@ btc_marima_forecast <- predict_with_marima("BTC",
 
 #head(btc_marima_forecast)
 ```
+
+
+## Values
+```{r}
+head(actual_prices)
+head(btc_marima_forecast)
+```
+
 
 ## Evaluation function RMSE
 ```{r}
@@ -131,90 +138,12 @@ cat(sprintf("Root Mean Squared Error on Test Data: $%.2f\n", marima_rmse))
 ```
 
 
-## Training
-```{r}
-library(marima)
-
-xtrain <- xtrain_list$BTC
-xtest <- xtest_list$BTC
-ytrain <- ytrain_list$BTC
-ytest <- ytest_list$BTC
-
-train_data <- as.matrix(cbind(xtrain, close = ytrain))
-test_data <- as.matrix(cbind(xtest, close = ytest))
-
-model_def <- define.model(kvar = 9,
-                         ar = c(1, 2),        # AR lags at 1 and 2
-                         ma = c(1),           # MA lag at 1
-                         reg.var = c(1:8))    # Predictors for close
-
-fit <- marima(train_data, 
-              ar.pattern = model_def$ar.pattern, 
-              ma.pattern = model_def$ma.pattern,
-              Plot = "none")
-```
-
-
-## Forecasting
-```{r}
-full_series <- rbind(train_data, test_data)
-
-nstart <- nrow(train_data)
-nstep <- nrow(test_data)
-
-forecast_result <- arma.forecast(series = full_series,
-                                marima = fit,
-                                nstart = nstart,
-                                nstep = nstep)
-
-# Extract forecasted values
-forecasted_prices <- forecast_result$forecasts[9, (nstart+1):(nstart+nstep)]
-actual_prices <- test_data[, 9]
-```
-
-
-## Values
-```{r}
-head(actual_prices)
-head(forecasted_prices)
-length(actual_prices)
-length(forecasted_prices)
-```
-
-
-## Evaluation
-```{r}
-mae <- mean(abs(forecasted_prices - actual_prices))
-cat(sprintf("Mean Absolute Error on Test Data: $%.2f\n", mae))
-
-rmse <- sqrt(mean((forecasted_prices - actual_prices)^2))
-cat(sprintf("Root Mean Squared Error on Test Data: $%.2f\n", rmse))
-```
-
-
 ## Plot
 ```{r}
-str(forecast_result)
-
-var_array <- forecast_result$prediction.variances
-if (is.list(var_array)) {
-  var_array <- var_array[[1]]
-}
-
-pred_var <- as.numeric(var_array[6, 6, 1:nstep])
-
-pred_std <- sqrt(pred_var)
-
-# 95% CI bounds
-upper_bound <- forecasted_prices + 1.96 * pred_std
-lower_bound <- forecasted_prices - 1.96 * pred_std
-
 plot(actual_prices, type = "l", col = "blue", 
      main = "MARIMA Price Forecast with CI",
      ylab = "Price", xlab = "Time")
-lines(forecasted_prices, col = "red")
-lines(upper_bound, col = "gray", lty = 2)
-lines(lower_bound, col = "gray", lty = 2)
-legend("topright", legend = c("Actual","Forecast","95% CI"),
-       col = c("blue","red","gray"), lty = c(1,1,3))
+lines(btc_marima_forecast, col = "red")
+legend("topright", legend = c("Actual","Forecast"),
+       col = c("blue","red"), lty = c(1,1))
 ```
