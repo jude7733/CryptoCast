@@ -3,7 +3,7 @@ title: "LSTM"
 format: html
 ---
 
-# LSTM Price forcast
+# LSTM Price forcast Multivariate
 
 ## Load data
 ```{r}
@@ -164,3 +164,120 @@ legend("topright",
        lty = c(1, 2), lwd = 2, bty = "n")
 ```
 
+
+# LSTM univariate
+
+## Load data
+```{r}
+xtrain_list <- readRDS("data/xtrain_list.rds")
+xtest_list <- readRDS("data/xtest_list.rds")
+ytrain_list <- readRDS("data/ytrain_list.rds")
+ytest_list <- readRDS("data/ytest_list.rds")
+
+head(xtrain_list$BTC)
+```
+
+## Sliding window function
+```{r}
+create_sequences <- function(data, window_size) {
+  
+  x_list <- list()
+  y_list <- list()
+  
+  n_samples <- length(data) - window_size
+  
+  for (i in 1:n_samples) {
+    input_window <- data[i:(i + window_size - 1)]
+    
+    target_value <- data[i + window_size]
+    
+    x_list[[i]] <- input_window
+    y_list[[i]] <- target_value
+  }
+  
+  return(list(x = x_list, y = y_list))
+}
+```
+
+
+## Make inputs to 3D shape:
+
+*Samples*: The total number of windows we created.
+*Timesteps*: How many time steps are in each window (in our case, 10).
+*Features*: How many variables we are looking at in each time step.
+```{r}
+library("keras3")
+
+window_size <- 10
+sequences <- create_sequences(ytrain_list$BTC$close, window_size)
+
+n_samples <- length(sequences$x)
+n_timesteps <- window_size
+n_features <- 1
+
+x_vector <- unlist(sequences$x)
+xtrain <- array_reshape(x_vector, c(n_samples, n_timesteps, n_features))
+
+y_vector <- unlist(sequences$y)
+ytrain <- array_reshape(y_vector, c(n_samples, 1))
+
+dim(xtrain)
+dim(ytrain)
+```
+
+
+## Model definition
+```{r}
+inputs <- layer_input(shape = c(n_timesteps, n_features))
+
+outputs <- inputs |>
+layer_lstm(units = 150) |>
+  layer_dense(units = 1, activation = "linear")
+
+model <- keras_model(inputs = inputs, outputs = outputs)
+
+summary(model)
+```
+
+
+## Findings
+- Simple LSTM
+Trainable params: 71,051 (277.54 KB)
+- Bidirectional LSTM
+rmse 32k for 40 epoch, Trainable params: 182,101
+- Batch normalized LSTM
+rmse 35k for 30 epoch, Trainable params: 128,803 (503.14 KB), Non-trainable params: 386 (1.51 KB)
+-  CNN-LSTM Hybrid Architecture
+rmse 35k for 40k, Trainable params: 160,929 (628.63 KB)
+
+
+## Compile
+```{r}
+model |> compile(
+  optimizer = optimizer_adam(learning_rate = 0.001),
+  loss = "mse",
+  metrics = c("mae", "root_mean_squared_error")
+)
+```
+
+
+## Training
+```{r}
+early_stopping <- callback_early_stopping(patience = 10,
+                                          restore_best_weights = TRUE)
+
+history <- model |> fit(
+  xtrain,
+  ytrain,
+  epochs = 50,
+  batch_size = 15,
+  validation_split = 0.2,
+  shuffle = FALSE,
+  verbose = 1,
+  callbacks = list(early_stopping)
+)
+
+cat("--- Training Complete ---\n\n")
+
+plot(history)
+```
