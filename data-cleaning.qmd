@@ -1,0 +1,21 @@
+---
+title: "data-cleaning"
+format: html
+---
+
+
+```{r}
+getYfinanceData <- readRDS("data/getYfinanceData.rds")
+```
+
+
+## Get BTC data
+```{r}
+btc_df <- getYfinanceData("BTC-USD")
+print(btc_df)
+```
+
+
+```{r}
+summary(btc_df)
+```

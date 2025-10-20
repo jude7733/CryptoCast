@@ -6,7 +6,7 @@ format: html
 
 ## Prerequisites
 ```{r}
-install.packages(c("tidyverse", "data.table", "patchwork", "corrplot", "tensorflow", "keras", "zoo"))
+install.packages(c("tidyverse", "data.table", "patchwork", "corrplot", "tensorflow", "keras3", "zoo"))
 ```
 
 
@@ -41,4 +41,22 @@ if (!dir.exists("data")) {
 }
 
 saveRDS(crypto_data, "data/crypto_data.rds")
+```
+
+
+## Yfinance daily tickers
+```{r}
+install.packages("quantmod")
+```
+```{r}
+getYfinanceData <- function(coin_name){
+library(quantmod)
+
+  df <- getSymbols(coin_name, src='yahoo', auto.assign=FALSE)
+  names(df) <- tolower(gsub(paste0(coin_name , "."), "", names(df)))
+  df$adjusted <- NULL
+  return(df)
+}
+
+saveRDS(getYfinanceData, "data/getYfinanceData.rds")
 ```
