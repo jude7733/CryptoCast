@@ -1,0 +1,143 @@
+---
+title: "xgboost"
+format: html
+---
+
+# XGBoost algorithm
+
+```{r}
+#install.packages("xgboost")
+#install.packages("DiagrammeR")
+
+library(xgboost)
+library(Matrix)
+library(DiagrammeR)
+```
+
+
+## Load data
+```{r}
+xtrain_list <- readRDS("data/xtrain_list.rds")
+xtest_list <- readRDS("data/xtest_list.rds")
+ytrain_list <- readRDS("data/ytrain_list.rds")
+ytest_list <- readRDS("data/ytest_list.rds")
+
+crypto <- "BTC"
+```
+
+
+# Prepare data
+```{r}
+xtrain <- xtrain_list[[crypto]]
+ytrain <- ytrain_list[[crypto]]$close
+
+xtest <- xtest_list[[crypto]]
+ytest <- ytest_list[[crypto]]$close
+```
+
+
+# Convert to matrix format (XGBoost requires matrices)
+```{r}
+xtrain_matrix <- as.matrix(xtrain)
+xtest_matrix <- as.matrix(xtest)
+
+dtrain <- xgb.DMatrix(data = xtrain_matrix, label = ytrain)
+dtest <- xgb.DMatrix(data = xtest_matrix, label = ytest)
+```
+
+
+## Set parameters
+```{r}
+params <- list(
+  objective = "reg:squarederror",  # Regression with MSE
+  eval_metric = "rmse",            # Evaluation metric
+  eta = 0.1,                       # Learning rate (0.01-0.3)
+  max_depth = 6,                   # Max tree depth (3-10)
+  min_child_weight = 1,            # Minimum sum of weights in child
+  subsample = 0.8,                 # Row sampling (0.5-1.0)
+  colsample_bytree = 0.8,          # Column sampling (0.5-1.0)
+  gamma = 0,                       # Minimum loss reduction for split
+  alpha = 0,                       # L1 regularization
+  lambda = 1                       # L2 regularization
+)
+```
+
+
+## Train model with early stopping
+```{r}
+set.seed(123)
+xgb_model <- xgb.train(
+  params = params,
+  data = dtrain,
+  nrounds = 1000,                  # Max number of boosting rounds
+  watchlist = list(train = dtrain, test = dtest),
+  early_stopping_rounds = 50,      # Stop if no improvement for 50 rounds
+  verbose = 1,                     # Print progress
+  print_every_n = 10               # Print every 10 rounds
+)
+```
+
+
+## Print best iteration
+```{r}
+cat("\nBest iteration:", xgb_model$best_iteration, "\n")
+cat("Best RMSE:", xgb_model$best_score, "\n")
+```
+
+
+## Feature importance
+```{r}
+importance_matrix <- xgb.importance(
+  feature_names = colnames(xtrain_matrix),
+  model = xgb_model
+)
+print(importance_matrix)
+
+xgb.plot.importance(importance_matrix, top_n = 10, 
+                    main = "Top 10 Feature Importance")
+```
+
+
+## Make predictions on test set
+```{r}
+predictions <- predict(xgb_model, dtest)
+```
+
+
+## Evaluate performance
+```{r}
+mae <- mean(abs(predictions - ytest))
+rmse <- sqrt(mean((predictions - ytest)^2))
+mape <- mean(abs((predictions - ytest) / ytest)) * 100
+rsq <- 1 - sum((predictions - ytest)^2) / sum((ytest - mean(ytest))^2)
+
+cat("\n--- Model Performance ---\n")
+cat("MAE:", round(mae, 4), "\n")
+cat("RMSE:", round(rmse, 4), "\n")
+cat("MAPE:", round(mape, 2), "%\n")
+cat("R-squared:", round(rsq, 4), "\n")
+```
+
+
+## Plot predictions vs actual
+```{r}
+plot(ytest, type = "l", col = "blue", lwd = 2,
+     main = paste(crypto, "Price: Actual vs Predicted"),
+     xlab = "Time", ylab = "Price",
+     ylim = range(c(ytest, predictions)))
+lines(predictions, col = "red", lwd = 2, lty = 2)
+legend("topleft", legend = c("Actual", "Predicted"),
+       col = c("blue", "red"), lty = c(1, 2), lwd = 2)
+
+# Scatter plot: Predicted vs Actual
+plot(ytest, predictions,
+     main = "Predicted vs Actual Prices",
+     xlab = "Actual Price", ylab = "Predicted Price",
+     pch = 19, col = rgb(0, 0, 1, 0.5))
+
+# Plot learning curves
+xgb.plot.tree(model = xgb_model, 
+              trees = 0, 
+              feature_names = colnames(xtrain_matrix),
+              render = TRUE)
+```

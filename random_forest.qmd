@@ -1,0 +1,104 @@
+---
+title: "random_forest"
+format: html
+---
+
+# Random Forest
+
+```{r}
+# install.packages("randomForest")
+```
+
+## Load data
+```{r}
+xtrain_list <- readRDS("data/xtrain_list.rds")
+xtest_list <- readRDS("data/xtest_list.rds")
+ytrain_list <- readRDS("data/ytrain_list.rds")
+ytest_list <- readRDS("data/ytest_list.rds")
+
+head(ytrain_list$BTC)
+```
+
+
+## Prepare data
+```{r}
+library(randomForest)
+
+crypto <- "BTC"
+
+xtrain <- xtrain_list[[crypto]]
+ytrain <- ytrain_list[[crypto]]$close
+
+# Prepare test data
+xtest <- xtest_list[[crypto]]
+ytest <- ytest_list[[crypto]]$close
+
+# Check dimensions
+cat("Training samples:", nrow(xtrain), "\n")
+cat("Test samples:", nrow(xtest), "\n")
+```
+
+
+# Train Random Forest model
+```{r}
+set.seed(123)
+rf_model <- randomForest(
+  x = xtrain,
+  y = ytrain,
+  ntree = 500,           # Number of trees
+  mtry = sqrt(ncol(xtrain)),  # Number of features per split (default for regression)
+  importance = TRUE,     # Calculate feature importance
+  nodesize = 5,          # Minimum size of terminal nodes
+  maxnodes = NULL        # Max terminal nodes (NULL = no limit)
+)
+
+print(rf_model)
+```
+
+
+## View feature importance
+```{r}
+importance(rf_model)
+varImpPlot(rf_model, main = "Feature Importance")
+```
+
+
+## Make predictions on test set
+```{r}
+predictions <- predict(rf_model, newdata = xtest)
+```
+
+
+## Evaluate performance
+```{r}
+mae <- mean(abs(predictions - ytest))
+rmse <- sqrt(mean((predictions - ytest)^2))
+mape <- mean(abs((predictions - ytest) / ytest)) * 100
+
+cat("\n--- Model Performance ---\n")
+cat("MAE:", round(mae, 4), "\n")
+cat("RMSE:", round(rmse, 4), "\n")
+cat("MAPE:", round(mape, 2), "%\n")
+
+
+# Calculate R-squared
+rsq <- 1 - sum((predictions - ytest)^2) / sum((ytest - mean(ytest))^2)
+cat("R-squared:", round(rsq, 4), "\n")
+```
+
+
+## Plot predictions vs actual
+```{r}
+plot(ytest, type = "l", col = "blue", lwd = 2, 
+     main = paste(crypto, "Price: Actual vs Predicted"),
+     xlab = "Time", ylab = "Price", ylim = range(c(ytest, predictions)))
+lines(predictions, col = "red", lwd = 2, lty = 2)
+legend("topleft", legend = c("Actual", "Predicted"), 
+       col = c("blue", "red"), lty = c(1, 2), lwd = 2)
+
+# Scatter plot: Predicted vs Actual
+plot(ytest, predictions, 
+     main = "Predicted vs Actual Prices",
+     xlab = "Actual Price", ylab = "Predicted Price",
+     pch = 19, col = rgb(0, 0, 1, 0.5))
+```
