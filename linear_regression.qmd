@@ -1,0 +1,127 @@
+---
+title: "linear_regression"
+format: html
+---
+
+# Univariate
+
+```{r}
+# Load data
+xtrain_list <- readRDS("data/xtrain_list.rds")
+xtest_list <- readRDS("data/xtest_list.rds")
+ytrain_list <- readRDS("data/ytrain_list.rds")
+ytest_list <- readRDS("data/ytest_list.rds")
+
+crypto <- "BTC"
+
+# --- UNIVARIATE: Use only ONE predictor ---
+# Example: Use only the first column (e.g., lagged close price)
+xtrain_uni <- xtrain_list[[crypto]][, 1, drop = FALSE]  # Keep as data frame
+xtest_uni <- xtest_list[[crypto]][, 1, drop = FALSE]
+
+ytrain <- ytrain_list[[crypto]]$close
+ytest <- ytest_list[[crypto]]$close
+
+# Check data
+cat("Univariate predictor:", colnames(xtrain_uni), "\n")
+cat("Training samples:", nrow(xtrain_uni), "\n")
+cat("Test samples:", nrow(xtest_uni), "\n")
+
+# Train univariate linear regression
+lm_uni <- lm(ytrain ~ ., data = xtrain_uni)
+
+# Model summary
+summary(lm_uni)
+
+# Make predictions
+predictions_uni <- predict(lm_uni, newdata = xtest_uni)
+
+# Evaluate performance
+mae_uni <- mean(abs(predictions_uni - ytest))
+rmse_uni <- sqrt(mean((predictions_uni - ytest)^2))
+rsq_uni <- summary(lm_uni)$r.squared
+adj_rsq_uni <- summary(lm_uni)$adj.r.squared
+
+cat("\n--- Univariate Model Performance ---\n")
+cat("MAE:", round(mae_uni, 4), "\n")
+cat("RMSE:", round(rmse_uni, 4), "\n")
+cat("R-squared:", round(rsq_uni, 4), "\n")
+cat("Adjusted R-squared:", round(adj_rsq_uni, 4), "\n")
+
+# Plot predictions vs actual
+plot(ytest, type = "l", col = "blue", lwd = 2,
+     main = paste(crypto, "Univariate LR: Actual vs Predicted"),
+     xlab = "Time", ylab = "Price")
+lines(predictions_uni, col = "red", lwd = 2, lty = 2)
+legend("topleft", legend = c("Actual", "Predicted"),
+       col = c("blue", "red"), lty = c(1, 2), lwd = 2)
+
+# Residual plots
+par(mfrow = c(2, 2))
+plot(lm_uni)
+par(mfrow = c(1, 1))
+```
+
+# Multivariate
+
+```{r}
+# --- MULTIVARIATE: Use ALL predictors ---
+xtrain_multi <- xtrain_list[[crypto]]  # All features
+xtest_multi <- xtest_list[[crypto]]
+
+ytrain <- ytrain_list[[crypto]]$close
+ytest <- ytest_list[[crypto]]$close
+
+# Check data
+cat("\nMultivariate predictors:", ncol(xtrain_multi), "features\n")
+cat("Feature names:", colnames(xtrain_multi), "\n")
+
+# Train multivariate linear regression
+lm_multi <- lm(ytrain ~ ., data = xtrain_multi)
+
+# Model summary
+summary(lm_multi)
+
+# Make predictions
+predictions_multi <- predict(lm_multi, newdata = xtest_multi)
+
+# Evaluate performance
+mae_multi <- mean(abs(predictions_multi - ytest))
+rmse_multi <- sqrt(mean((predictions_multi - ytest)^2))
+rsq_multi <- summary(lm_multi)$r.squared
+adj_rsq_multi <- summary(lm_multi)$adj.r.squared
+
+cat("\n--- Multivariate Model Performance ---\n")
+cat("MAE:", round(mae_multi, 4), "\n")
+cat("RMSE:", round(rmse_multi, 4), "\n")
+cat("R-squared:", round(rsq_multi, 4), "\n")
+cat("Adjusted R-squared:", round(adj_rsq_multi, 4), "\n")
+
+# Plot predictions vs actual
+plot(ytest, type = "l", col = "blue", lwd = 2,
+     main = paste(crypto, "Multivariate LR: Actual vs Predicted"),
+     xlab = "Time", ylab = "Price")
+lines(predictions_multi, col = "red", lwd = 2, lty = 2)
+legend("topleft", legend = c("Actual", "Predicted"),
+       col = c("blue", "red"), lty = c(1, 2), lwd = 2)
+
+# Scatter plot: Predicted vs Actual
+plot(ytest, predictions_multi,
+     main = "Multivariate: Predicted vs Actual",
+     xlab = "Actual Price", ylab = "Predicted Price",
+     pch = 19, col = rgb(0, 0, 1, 0.5))
+abline(a = 0, b = 1, col = "red", lwd = 2)
+
+# Residual diagnostics
+par(mfrow = c(2, 2))
+plot(lm_multi)
+par(mfrow = c(1, 1))
+
+# Feature coefficients (which features are most important?)
+coefficients <- coef(lm_multi)
+coefficients_sorted <- sort(abs(coefficients[-1]), decreasing = TRUE)  # Exclude intercept
+cat("\nTop 5 Important Features (by coefficient magnitude):\n")
+print(head(coefficients_sorted, 5))
+
+```
+
