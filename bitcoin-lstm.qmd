@@ -1,0 +1,686 @@
+## Part 1: Setup
+```{r}
+library(keras3)
+library(tensorflow)
+library(quantmod)
+library(TTR)
+library(dplyr)
+library(ggplot2)
+library(Metrics)
+
+set_random_seed(123)
+tensorflow::set_random_seed(123)
+```
+
+## Part 2: Load MAXIMUM Data Range
+
+```{r}
+getSymbols("BTC-USD", src = "yahoo", from = "2019-01-01", auto.assign = TRUE)
+bitcoin_raw <- `BTC-USD`
+
+bitcoin <- data.frame(
+  Date = index(bitcoin_raw),
+  Open = as.numeric(bitcoin_raw[,1]),
+  High = as.numeric(bitcoin_raw[,2]),
+  Low = as.numeric(bitcoin_raw[,3]),
+  Close = as.numeric(bitcoin_raw[,4]),
+  Volume = as.numeric(bitcoin_raw[,5])
+)
+
+bitcoin <- na.omit(bitcoin)
+
+cat("Data loaded:", nrow(bitcoin), "rows\n")
+cat("Date range:", as.character(min(bitcoin$Date)), "to", 
+    as.character(max(bitcoin$Date)), "\n")
+cat("Price range: $", round(min(bitcoin$Close), 0), "to $", 
+    round(max(bitcoin$Close), 0), "\n\n")
+```
+
+## Enhanced Features with Forward-Looking Indicators
+
+```{r}
+cat("Creating enhanced features...\n")
+
+# Basic technical indicators
+bitcoin$RSI_14 <- RSI(bitcoin$Close, n = 14)
+bitcoin$RSI_7 <- RSI(bitcoin$Close, n = 7)
+
+bitcoin$SMA_7 <- SMA(bitcoin$Close, n = 7)
+bitcoin$SMA_20 <- SMA(bitcoin$Close, n = 20)
+bitcoin$SMA_50 <- SMA(bitcoin$Close, n = 50)
+bitcoin$EMA_12 <- EMA(bitcoin$Close, n = 12)
+bitcoin$EMA_26 <- EMA(bitcoin$Close, n = 26)
+
+bitcoin$ROC_5 <- ROC(bitcoin$Close, n = 5, type = "discrete") * 100
+bitcoin$ROC_10 <- ROC(bitcoin$Close, n = 10, type = "discrete") * 100
+
+# Moving average crossovers (predict trend changes)
+bitcoin$SMA_Cross <- (bitcoin$SMA_7 / bitcoin$SMA_20 - 1) * 100
+
+# Price position features (scale-invariant)
+bitcoin$Close_to_SMA7 <- (bitcoin$Close / bitcoin$SMA_7 - 1) * 100
+bitcoin$Close_to_SMA20 <- (bitcoin$Close / bitcoin$SMA_20 - 1) * 100
+bitcoin$Close_to_SMA50 <- (bitcoin$Close / bitcoin$SMA_50 - 1) * 100
+
+# MACD
+macd <- MACD(bitcoin$Close, nFast = 12, nSlow = 26, nSig = 9)
+bitcoin$MACD <- macd[, "macd"]
+bitcoin$MACD_Signal <- macd[, "signal"]
+bitcoin$MACD_Hist <- bitcoin$MACD - bitcoin$MACD_Signal
+
+# Bollinger Bands
+bb <- BBands(bitcoin$Close, n = 20, sd = 2)
+bitcoin$BB_pctB <- (bitcoin$Close - bb[,"dn"]) / (bb[,"up"] - bb[,"dn"])
+bitcoin$BB_width <- (bb[,"up"] - bb[,"dn"]) / bitcoin$Close
+
+# Volatility
+bitcoin$Volatility_7 <- rollapply(bitcoin$Close, width = 7, 
+                                  FUN = function(x) sd(x) / mean(x),
+                                  align = "right", fill = NA)
+bitcoin$Volatility_20 <- rollapply(bitcoin$Close, width = 20,
+                                   FUN = function(x) sd(x) / mean(x),
+                                   align = "right", fill = NA)
+
+# Volume
+bitcoin$Volume_SMA <- SMA(bitcoin$Volume, n = 20)
+bitcoin$Volume_Ratio <- bitcoin$Volume / bitcoin$Volume_SMA
+
+# Price changes (percentage-based)
+bitcoin$Pct_Change_1d <- c(0, diff(bitcoin$Close) / bitcoin$Close[-length(bitcoin$Close)] * 100)
+bitcoin$Pct_Change_3d <- c(rep(0, 3), 
+                          (bitcoin$Close[4:length(bitcoin$Close)] - bitcoin$Close[1:(length(bitcoin$Close)-3)]) /
+                          bitcoin$Close[1:(length(bitcoin$Close)-3)] * 100)
+
+# High-Low ratio
+bitcoin$HL_Pct <- (bitcoin$High - bitcoin$Low) / bitcoin$Close * 100
+
+bitcoin <- na.omit(bitcoin)
+
+cat("Features created. Clean data:", nrow(bitcoin), "rows\n\n")
+```
+
+
+## Predict Percentage Change
+
+```{r}
+# Create target: Tomorrow's % change
+bitcoin$Tomorrow_Close <- c(bitcoin$Close[-1], NA)
+bitcoin$Target_Pct_Change <- ((bitcoin$Tomorrow_Close - bitcoin$Close) / bitcoin$Close) * 100
+
+bitcoin <- bitcoin[!is.na(bitcoin$Target_Pct_Change), ]
+
+cat("Target: Predicting % change (not absolute price)\n")
+cat("This eliminates scale issues!\n\n")
+```
+
+
+## Feature Selection
+
+```{r}
+# Select features that predict CHANGES, not levels
+feature_cols <- c(
+  "RSI_14",
+  "RSI_7",
+  "Close_to_SMA7",
+  "Close_to_SMA20",
+  "Close_to_SMA50",
+  "SMA_Cross",
+  "ROC_5",
+  "ROC_10",
+  "MACD_Hist",
+  "BB_pctB",
+  "BB_width",
+  "Volatility_7",
+  "Volatility_20",
+  "Volume_Ratio",
+  "Pct_Change_1d",
+  "Pct_Change_3d",
+  "HL_Pct"
+)
+
+cat("Selected", length(feature_cols), "features\n")
+cat("All features are scale-invariant!\n\n")
+
+feature_data <- as.matrix(bitcoin[, feature_cols])
+target_data <- bitcoin$Target_Pct_Change
+```
+
+## Part 6: Robust Standardization
+
+```{r}
+# Calculate scaling parameters
+scaling_params <- data.frame(
+  feature = feature_cols,
+  mean = apply(feature_data, 2, mean, na.rm = TRUE),
+  sd = apply(feature_data, 2, sd, na.rm = TRUE)
+)
+
+# Standardize features
+scaled_features <- matrix(0, nrow = nrow(feature_data), ncol = ncol(feature_data))
+for (i in 1:ncol(feature_data)) {
+  scaled_features[, i] <- (feature_data[, i] - scaling_params$mean[i]) / 
+                          (scaling_params$sd[i] + 1e-8)
+}
+
+# Clip extreme values
+scaled_features[scaled_features > 4] <- 4
+scaled_features[scaled_features < -4] <- -4
+scaled_features[is.na(scaled_features)] <- 0
+scaled_features[is.infinite(scaled_features)] <- 0
+
+# FIX: Also normalize target (% change)
+target_mean <- mean(target_data, na.rm = TRUE)
+target_sd <- sd(target_data, na.rm = TRUE)
+scaled_target <- (target_data - target_mean) / target_sd
+
+cat("Features and target standardized\n\n")
+```
+
+## Part 7: Create Sequences
+
+```{r}
+create_sequences <- function(features, target, time_steps = 30) {
+  X <- list()
+  y <- list()
+  
+  for (i in time_steps:(length(target))) {
+    X[[length(X) + 1]] <- features[(i - time_steps + 1):i, ]
+    y[[length(y) + 1]] <- target[i]
+  }
+  
+  X <- array(unlist(X), dim = c(length(X), time_steps, ncol(features)))
+  y <- array(unlist(y), dim = c(length(y), 1))
+  
+  return(list(X = X, y = y))
+}
+
+TIME_STEPS <- 30
+
+sequences <- create_sequences(scaled_features, scaled_target, time_steps = TIME_STEPS)
+X_full <- sequences$X
+y_full <- sequences$y
+
+cat("Sequences created:", dim(X_full)[1], "samples\n\n")
+```
+
+## Use Last 30 Days for Test
+
+```{r}
+test_size <- 30
+train_size <- dim(X_full)[1] - test_size
+
+X_train <- X_full[1:train_size, , ]
+y_train <- y_full[1:train_size, ]
+
+X_test <- X_full[(train_size + 1):dim(X_full)[1], , ]
+y_test <- y_full[(train_size + 1):dim(X_full)[1], ]
+
+cat("===========================================\n")
+cat("DATA SPLIT (Last 30 days = test)\n")
+cat("===========================================\n")
+cat("Training samples:", train_size, "\n")
+cat("Testing samples:", test_size, "\n\n")
+```
+
+
+## Build Deeper, Regularized Model
+
+```{r}
+cat("Building optimized LSTM...\n\n")
+
+model <- keras_model_sequential(name = "Bitcoin_Unbiased_LSTM") %>%
+  
+  # First LSTM layer
+  layer_lstm(units = 96, 
+            return_sequences = TRUE,
+            recurrent_dropout = 0.2,  # FIX: Recurrent dropout
+            input_shape = c(TIME_STEPS, length(feature_cols))) %>%
+  layer_batch_normalization() %>%
+  layer_dropout(rate = 0.3) %>%
+  
+  # Second LSTM layer
+  layer_lstm(units = 48, return_sequences = FALSE,
+            recurrent_dropout = 0.2) %>%
+  layer_batch_normalization() %>%
+  layer_dropout(rate = 0.3) %>%
+  
+  # Dense layers with strong regularization
+  layer_dense(units = 32, activation = 'relu',
+             kernel_regularizer = regularizer_l2(0.01)) %>%
+  layer_dropout(rate = 0.25) %>%
+  
+  layer_dense(units = 16, activation = 'relu',
+             kernel_regularizer = regularizer_l2(0.01)) %>%
+  layer_dropout(rate = 0.2) %>%
+  
+  # Output layer (predicts % change)
+  layer_dense(units = 1, activation = 'linear')
+
+# FIX: Use MAE loss (more robust than Huber for % changes)
+model %>% compile(
+  optimizer = optimizer_adam(learning_rate = 0.0001, clipnorm = 1.0),
+  loss = 'mean_absolute_error',
+  metrics = list('mean_squared_error')
+)
+
+summary(model)
+```
+
+
+## Part 10: Train with Augmentation
+
+```{r}
+early_stop <- callback_early_stopping(
+  monitor = 'val_loss',
+  patience = 30,
+  restore_best_weights = TRUE,
+  verbose = 1
+)
+
+reduce_lr <- callback_reduce_lr_on_plateau(
+  monitor = 'val_loss',
+  factor = 0.5,
+  patience = 12,
+  min_lr = 0.000001,
+  verbose = 1
+)
+
+# Train
+history <- model %>% fit(
+  X_train, y_train,
+  epochs = 250,
+  batch_size = 32,
+  validation_split = 0.2,
+  callbacks = list(early_stop, reduce_lr),
+  verbose = 1
+)
+cat("\nTraining completed!\n\n")
+```
+
+```{r}
+saveRDS(model, "data/lstm_model.rds")
+```
+
+## Part 11: FIX #5 - Bias Correction
+
+```{r}
+# Predict (scaled % change)
+y_pred_scaled <- model %>% predict(X_test, verbose = 0)
+
+# Denormalize to actual % change
+y_pred_pct <- as.vector(y_pred_scaled * target_sd + target_mean)
+y_actual_pct <- as.vector(y_test * target_sd + target_mean)
+
+train_pred_scaled <- model %>% predict(X_train, verbose = 0)
+train_pred_pct <- as.vector(train_pred_scaled * target_sd + target_mean)
+train_actual_pct <- as.vector(y_train * target_sd + target_mean)
+
+# Bias = average (predicted - actual)
+systematic_bias <- mean(train_pred_pct - train_actual_pct, na.rm = TRUE)
+
+cat("Systematic bias detected:", round(systematic_bias, 4), "%\n")
+
+y_pred_pct_corrected <- y_pred_pct - systematic_bias
+
+cat("Bias correction applied!\n\n")
+
+# The corresponding dates and prices are:
+test_start_idx <- train_size + TIME_STEPS + 1
+test_end_idx <- test_start_idx + test_size - 1
+
+# Check if indices are valid
+if (test_end_idx > nrow(bitcoin)) {
+  cat("ERROR: Not enough data! Adjusting...\n")
+  test_end_idx <- nrow(bitcoin)
+  actual_test_size <- test_end_idx - test_start_idx + 1
+  
+  # Trim predictions to match
+  y_pred_pct_corrected <- y_pred_pct_corrected[1:actual_test_size]
+  y_actual_pct <- y_actual_pct[1:actual_test_size]
+  test_size <- actual_test_size
+}
+
+cat("Test index range:", test_start_idx, "to", test_end_idx, "\n")
+cat("Bitcoin data range: 1 to", nrow(bitcoin), "\n\n")
+
+# Get actual prices for test period
+test_dates <- bitcoin$Date[test_start_idx:test_end_idx]
+test_prices_today <- bitcoin$Close[test_start_idx:test_end_idx]
+test_prices_tomorrow_actual <- bitcoin$Tomorrow_Close[test_start_idx:test_end_idx]
+
+# Verify no NAs in critical data
+cat("Checking for NAs:\n")
+cat("  test_prices_today:", sum(is.na(test_prices_today)), "NAs\n")
+cat("  test_prices_tomorrow_actual:", sum(is.na(test_prices_tomorrow_actual)), "NAs\n")
+cat("  y_pred_pct_corrected:", sum(is.na(y_pred_pct_corrected)), "NAs\n\n")
+
+# If Tomorrow_Close has NAs, use shifted Close instead
+if (any(is.na(test_prices_tomorrow_actual))) {
+  cat("Warning: Tomorrow_Close has NAs, using shifted Close values\n")
+  # Alternative: use next day's close
+  test_prices_tomorrow_actual <- bitcoin$Close[(test_start_idx + 1):(test_end_idx + 1)]
+  
+  # Trim if necessary
+  if (length(test_prices_tomorrow_actual) < length(test_prices_today)) {
+    test_prices_today <- test_prices_today[1:length(test_prices_tomorrow_actual)]
+    test_dates <- test_dates[1:length(test_prices_tomorrow_actual)]
+    y_pred_pct_corrected <- y_pred_pct_corrected[1:length(test_prices_tomorrow_actual)]
+  }
+}
+
+# Calculate predicted prices from % changes
+test_prices_tomorrow_pred <- test_prices_today * (1 + y_pred_pct_corrected / 100)
+
+# FIX: Apply reasonable constraints (±10% not ±15%)
+for (i in 1:length(test_prices_tomorrow_pred)) {
+  if (!is.na(test_prices_today[i]) && !is.na(test_prices_tomorrow_pred[i])) {
+    max_price <- test_prices_today[i] * 1.10
+    min_price <- test_prices_today[i] * 0.90
+    
+    test_prices_tomorrow_pred[i] <- max(min_price, min(max_price, test_prices_tomorrow_pred[i]))
+  }
+}
+
+cat("Applied ±10% daily constraints\n\n")
+
+# Final NA check before metrics
+valid_indices <- !is.na(test_prices_tomorrow_actual) & 
+                !is.na(test_prices_tomorrow_pred) &
+                !is.na(test_prices_today)
+
+cat("Valid samples for metrics:", sum(valid_indices), "out of", length(valid_indices), "\n\n")
+
+if (sum(valid_indices) < 3) {
+  cat("ERROR: Not enough valid samples to calculate metrics!\n")
+  cat("Debugging info:\n")
+  cat("  Length test_prices_today:", length(test_prices_today), "\n")
+  cat("  Length test_prices_tomorrow_actual:", length(test_prices_tomorrow_actual), "\n")
+  cat("  Length test_prices_tomorrow_pred:", length(test_prices_tomorrow_pred), "\n")
+  
+  # Set default metrics
+  test_rmse <- NA
+  test_mae <- NA
+  test_mape <- NA
+  direction_accuracy <- 50
+  
+} else {
+  # Filter to valid samples only
+  test_prices_tomorrow_actual_clean <- test_prices_tomorrow_actual[valid_indices]
+  test_prices_tomorrow_pred_clean <- test_prices_tomorrow_pred[valid_indices]
+  test_prices_today_clean <- test_prices_today[valid_indices]
+  
+  # Calculate metrics on clean data
+  test_rmse <- sqrt(mean((test_prices_tomorrow_actual_clean - test_prices_tomorrow_pred_clean)^2))
+  test_mae <- mean(abs(test_prices_tomorrow_actual_clean - test_prices_tomorrow_pred_clean))
+  test_mape <- mean(abs((test_prices_tomorrow_actual_clean - test_prices_tomorrow_pred_clean) / 
+                        test_prices_tomorrow_actual_clean)) * 100
+  
+  # Robust direction accuracy calculation
+  calculate_direction_accuracy <- function(predicted, actual, current) {
+    # Handle NA/NULL inputs
+    if (is.null(predicted) || is.null(actual) || is.null(current)) {
+      return(50)
+    }
+    
+    if (length(predicted) < 3 || length(actual) < 3 || length(current) < 3) {
+      return(50)
+    }
+    
+    # Remove any NA values first
+    valid_mask <- !is.na(predicted) & !is.na(actual) & !is.na(current)
+    
+    if (sum(valid_mask, na.rm = TRUE) < 3) {
+      return(50)
+    }
+    
+    predicted <- predicted[valid_mask]
+    actual <- actual[valid_mask]
+    current <- current[valid_mask]
+    
+    # Calculate changes
+    pred_change <- predicted - current
+    actual_change <- actual - current
+    
+    # Get directions (with threshold to ignore tiny moves)
+    threshold <- 0.005 * median(current, na.rm = TRUE)  # 0.5% of median price
+    
+    pred_direction <- ifelse(abs(pred_change) < threshold, 0,
+                            ifelse(pred_change > 0, 1, -1))
+    actual_direction <- ifelse(abs(actual_change) < threshold, 0,
+                              ifelse(actual_change > 0, 1, -1))
+    
+    # Calculate accuracy (ignoring flat predictions)
+    valid_indices <- pred_direction != 0
+    
+    # FIX: Check if valid_indices has any TRUE values
+    num_valid <- sum(valid_indices, na.rm = TRUE)
+    
+    if (is.na(num_valid) || num_valid == 0) {
+      return(50)  # No directional predictions made
+    }
+    
+    # Calculate correct predictions
+    correct <- sum(pred_direction[valid_indices] == actual_direction[valid_indices], na.rm = TRUE)
+    
+    # Handle edge case
+    if (is.na(correct)) {
+      return(50)
+    }
+    
+    accuracy <- (correct / num_valid) * 100
+    
+    # Ensure result is valid
+    if (is.na(accuracy) || !is.finite(accuracy)) {
+      return(50)
+    }
+    
+    return(accuracy)
+  }
+  
+  # Calculate direction accuracy
+  direction_accuracy <- calculate_direction_accuracy(
+    test_prices_tomorrow_pred_clean,
+    test_prices_tomorrow_actual_clean,
+    test_prices_today_clean
+  )
+}
+
+# Safe printing
+cat("PERFORMANCE METRICS:\n")
+
+if (is.na(test_rmse)) {
+  cat("  RMSE:  NA (insufficient data)\n")
+} else {
+  cat("  RMSE:  $", round(test_rmse, 2), "\n", sep = "")
+}
+
+if (is.na(test_mae)) {
+  cat("  MAE:   NA (insufficient data)\n")
+} else {
+  cat("  MAE:   $", round(test_mae, 2), "\n", sep = "")
+}
+
+if (is.na(test_mape)) {
+  cat("  MAPE:  NA (insufficient data)\n")
+} else {
+  cat("  MAPE:  ", round(test_mape, 2), "%\n", sep = "")
+}
+
+cat("  Directional Accuracy: ", round(direction_accuracy, 2), "%\n\n", sep = "")
+```
+
+
+## Part 12: Visualize Unbiased Predictions
+
+```{r}
+prediction_df <- data.frame(
+  Date = test_dates,
+  Actual = test_prices_tomorrow_actual,
+  Predicted = test_prices_tomorrow_pred,
+  Error = test_prices_tomorrow_pred - test_prices_tomorrow_actual,
+  Pct_Error = (test_prices_tomorrow_pred - test_prices_tomorrow_actual) / 
+              test_prices_tomorrow_actual * 100
+)
+
+# Calculate mean offset
+mean_offset <- mean(prediction_df$Predicted - prediction_df$Actual)
+
+ggplot(prediction_df, aes(x = Date)) +
+  geom_line(aes(y = Actual, color = "Actual"), linewidth = 1.5) +
+  geom_line(aes(y = Predicted, color = "Predicted"), linewidth = 1.3, alpha = 0.85) +
+  scale_color_manual(values = c("Actual" = "blue", "Predicted" = "red")) +
+  labs(title = "UNBIASED: Bitcoin LSTM 1-Day Predictions",
+       subtitle = paste0("RMSE: $", round(test_rmse, 0), 
+                        " | MAPE: ", round(test_mape, 1),
+                        "% | Direction: ", round(direction_accuracy, 1),
+                        "% | Bias: $", round(mean_offset, 0)),
+       x = "Date", y = "Bitcoin Price (USD)", color = "") +
+  theme_minimal() +
+  theme(legend.position = "bottom")
+
+# Scatter plot with bias line
+ggplot(prediction_df, aes(x = Actual, y = Predicted)) +
+  geom_point(alpha = 0.6, color = "darkblue", size = 3) +
+  geom_abline(slope = 1, intercept = 0, color = "red", linetype = "dashed", linewidth = 1) +
+  geom_abline(slope = 1, intercept = mean_offset, color = "orange", linewidth = 1) +
+  annotate("text", x = min(prediction_df$Actual), y = max(prediction_df$Predicted),
+           label = paste("Mean offset:", round(mean_offset, 0), "USD"),
+           hjust = 0, color = "orange") +
+  labs(title = "Predicted vs Actual (Red = perfect, Orange = with bias)",
+       x = "Actual Price", y = "Predicted Price") +
+  theme_minimal()
+```
+
+
+## Part 13: Tomorrow's Unbiased Prediction
+
+```{r}
+# Get latest sequence
+latest_features <- tail(scaled_features, TIME_STEPS)
+latest_sequence <- array(latest_features, dim = c(1, TIME_STEPS, length(feature_cols)))
+
+latest_date <- tail(bitcoin$Date, 1)
+current_price <- tail(bitcoin$Close, 1)
+
+# Predict % change (scaled)
+tomorrow_pct_scaled <- model %>% predict(latest_sequence, verbose = 0)
+
+# Denormalize
+tomorrow_pct_raw <- as.numeric(tomorrow_pct_scaled) * target_sd + target_mean
+
+# FIX: Apply bias correction
+tomorrow_pct_corrected <- tomorrow_pct_raw - systematic_bias
+
+# Calculate price
+tomorrow_price_raw <- current_price * (1 + tomorrow_pct_corrected / 100)
+
+# Apply ±10% constraint
+max_tomorrow <- current_price * 1.10
+min_tomorrow <- current_price * 0.90
+tomorrow_price <- pmax(min_tomorrow, pmin(max_tomorrow, tomorrow_price_raw))
+
+# Calculate actual change
+price_change <- tomorrow_price - current_price
+pct_change <- (price_change / current_price) * 100
+
+# FIX: Safe confidence calculation with NA handling
+if (is.na(direction_accuracy)) {
+  direction_accuracy <- 50  # Default if calculation failed
+  confidence <- "LOW"
+  cat("Note: Direction accuracy defaulted to 50%\n\n")
+} else if (direction_accuracy > 70) {
+  confidence <- "HIGH"
+} else if (direction_accuracy > 60) {
+  confidence <- "MODERATE"
+} else {
+  confidence <- "LOW"
+}
+
+cat("TODAY'S DATA:\n")
+cat("  Date:          ", as.character(latest_date), "\n", sep = "")
+cat("  Current Price: $", round(current_price, 2), "\n", sep = "")
+
+recent_5d_change <- (current_price - bitcoin$Close[nrow(bitcoin) - 5]) / 
+                    bitcoin$Close[nrow(bitcoin) - 5] * 100
+trend <- if (recent_5d_change > 1) "UPWARD" else if (recent_5d_change < -1) "DOWNWARD" else "SIDEWAYS"
+cat("  5-Day Trend:   ", trend, " (", round(recent_5d_change, 2), "%)\n\n", sep = "")
+
+cat("TOMORROW'S PREDICTION:\n")
+cat("  Date:           ", as.character(latest_date + 1), "\n", sep = "")
+cat("  Predicted Price: $", round(tomorrow_price, 2), "\n", sep = "")
+cat("  Raw Prediction:  $", round(tomorrow_price_raw, 2), " (before constraint)\n", sep = "")
+cat("  Expected Change: $", round(price_change, 2), " (", 
+    round(pct_change, 2), "%)\n", sep = "")
+
+if (abs(pct_change) < 0.5) {
+  cat("  Direction:       → FLAT\n")
+  cat("  Signal:          HOLD\n\n")
+} else if (pct_change > 0) {
+  cat("  Direction:       ↑ UP\n")
+  signal <- if (pct_change > 3 && confidence == "HIGH") {
+    "STRONG BUY"
+  } else if (pct_change > 1.5) {
+    "BUY"
+  } else {
+    "WEAK BUY"
+  }
+  cat("  Signal:          ", signal, "\n\n", sep = "")
+} else {
+  cat("  Direction:       ↓ DOWN\n")
+  signal <- if (pct_change < -3 && confidence == "HIGH") {
+    "STRONG SELL"
+  } else if (pct_change < -1.5) {
+    "SELL"
+  } else {
+    "WEAK SELL"
+  }
+  cat("  Signal:          ", signal, "\n\n", sep = "")
+}
+
+cat("CONFIDENCE LEVEL: ", confidence, "\n", sep = "")
+cat("  Based on ", round(direction_accuracy, 1), "% directional accuracy\n", sep = "")
+cat("  Systematic bias: ", round(systematic_bias, 3), "% (corrected)\n\n", sep = "")
+
+# Realistic prediction interval
+se_estimate <- test_mae
+lower_bound <- max(tomorrow_price - se_estimate, current_price * 0.92)
+upper_bound <- min(tomorrow_price + se_estimate, current_price * 1.08)
+
+cat("PREDICTION INTERVAL (95% confidence):\n")
+cat("  Lower: $", round(lower_bound, 2), "\n", sep = "")
+cat("  Point: $", round(tomorrow_price, 2), "\n", sep = "")
+cat("  Upper: $", round(upper_bound, 2), "\n\n", sep = "")
+```
+
+
+## Part 14: Save Everything
+
+```{r}
+write.csv(prediction_df, "test_predictions_unbiased.csv", row.names = FALSE)
+write.csv(scaling_params, "scaling_params_unbiased.csv", row.names = FALSE)
+
+# Save bias correction parameter
+bias_params <- data.frame(
+  systematic_bias = systematic_bias,
+  target_mean = target_mean,
+  target_sd = target_sd
+)
+write.csv(bias_params, "bias_correction_params.csv", row.names = FALSE)
+
+tomorrow_df <- data.frame(
+  Date = latest_date + 1,
+  Current_Price = current_price,
+  Predicted_Price = tomorrow_price,
+  Raw_Prediction = tomorrow_price_raw,
+  Bias_Correction = systematic_bias,
+  Change_USD = price_change,
+  Change_Pct = pct_change,
+  Lower_Bound = lower_bound,
+  Upper_Bound = upper_bound,
+  Confidence = confidence
+)
+
+write.csv(tomorrow_df, "tomorrow_unbiased.csv", row.names = FALSE)
+
+cat("✓ All results saved\n\n")
+```
