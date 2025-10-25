@@ -301,7 +301,7 @@ cat("\nTraining completed!\n\n")
 saveRDS(model, "data/lstm_model.rds")
 ```
 
-## Part 11: FIX #5 - Bias Correction
+## Part 11 - Bias Correction
 
 ```{r}
 # Predict (scaled % change)

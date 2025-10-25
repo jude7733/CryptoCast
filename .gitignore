@@ -12,3 +12,7 @@ data
 .RDataTmp*
 arima_files
 arima.rmarkdown
+*.model
+*.csv
+models
+*.rmarkdown

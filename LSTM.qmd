@@ -173,8 +173,6 @@ xtrain_list <- readRDS("data/xtrain_list.rds")
 xtest_list <- readRDS("data/xtest_list.rds")
 ytrain_list <- readRDS("data/ytrain_list.rds")
 ytest_list <- readRDS("data/ytest_list.rds")
-
-head(xtrain_list$BTC)
 ```
 
 ## Sliding window function
@@ -263,7 +261,8 @@ model |> compile(
 
 ## Training
 ```{r}
-early_stopping <- callback_early_stopping(patience = 10,
+early_stopping <- callback_early_stopping(monitor = "val_loss",
+                                          patience = 10,
                                           restore_best_weights = TRUE)
 
 history <- model |> fit(
