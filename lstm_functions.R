@@ -462,7 +462,7 @@ save_crypto_model <- function(model, data_prep, evaluation, history, symbol, out
   if (!dir.exists(output_dir)) dir.create(output_dir, recursive = TRUE)
   
   model_path <- file.path(output_dir, paste0(symbol, "_model.keras"))
-  save_model(model, model_path)  # CHANGED
+  save_model(model, model_path, overwrite = TRUE)
   
   # Save metadata
   metadata <- list(
@@ -501,7 +501,7 @@ load_crypto_model <- function(symbol, model_dir = "models") {
   }
   
   tryCatch({
-    model <- load_model(model_path)  # CHANGED
+    model <- load_model(model_path)
     metadata <- readRDS(metadata_path)
     
     list(model = model, metadata = metadata)

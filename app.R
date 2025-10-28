@@ -307,218 +307,256 @@ server <- function(input, output, session) {
   # ============================================
   # QUICK PREDICTION (Use cached model if available)
   
-observeEvent(input$predict_btn, {
-  
-  symbol <- input$crypto_select
-  crypto_name <- names(crypto_list)[crypto_list == symbol]
-  
-  append_log(paste0("\n========== QUICK PREDICTION: ", crypto_name, " =========="))
-  append_log(paste0("Time: ", Sys.time()))
-  
-  # Check for cached model FIRST
-  model_path <- file.path(MODEL_DIR, paste0(symbol, "_model.keras"))
-  metadata_path <- file.path(MODEL_DIR, paste0(symbol, "_metadata.rds"))
-  
-  model_exists <- file.exists(model_path) && file.exists(metadata_path)
-  
-  if (input$use_cache && !model_exists) {
+  observeEvent(input$predict_btn, {
     
-    showModal(modalDialog(
-      title = tags$div(
-        icon("exclamation-triangle", style = "color: orange;"),
-        " No Trained Model Found"
-      ),
+    symbol <- input$crypto_select
+    crypto_name <- names(crypto_list)[crypto_list == symbol]
+    
+    append_log(paste0("\n========== QUICK PREDICTION: ", crypto_name, " =========="))
+    append_log(paste0("Time: ", Sys.time()))
+    
+    # Check for cached model FIRST
+    model_path <- file.path(MODEL_DIR, paste0(symbol, "_model.keras"))
+    metadata_path <- file.path(MODEL_DIR, paste0(symbol, "_metadata.rds"))
+    
+    model_exists <- file.exists(model_path) && file.exists(metadata_path)
+    
+    if (input$use_cache && !model_exists) {
       
-      tags$div(
-        style = "font-size: 16px;",
-        
-        p(strong(paste0("No saved model found for ", crypto_name))),
-        
-        p("The quick prediction feature requires a pre-trained model, but no model 
-          was found at:"),
-        
-        tags$code(
-          style = "display: block; background-color: #f5f5f5; padding: 10px; 
-                   margin: 10px 0; border-radius: 5px; font-size: 14px;",
-          model_path
+      showModal(modalDialog(
+        title = tags$div(
+          icon("exclamation-triangle", style = "color: orange;"),
+          " No Trained Model Found"
         ),
-        
-        hr(),
-        
-        h4("What would you like to do?"),
-        
-        tags$ol(
-          tags$li(strong("Train a new model"), " (Recommended) - Takes 5-10 minutes"),
-          tags$li(strong("Disable 'Use cached model'"), " option and predict again")
-        ),
-        
-        hr(),
         
         tags$div(
-          class = "alert alert-info",
-          style = "margin-top: 15px;",
-          icon("info-circle"),
-          " Once trained, the model will be saved for instant predictions in the future!"
-        )
-      ),
-      
-      footer = tagList(
-        actionButton(
-          "start_training",
-          "Train New Model Now",
-          icon = icon("play"),
-          class = "btn-primary"
+          style = "font-size: 16px;",
+          
+          p(strong(paste0("No saved model found for ", crypto_name))),
+          
+          p("The quick prediction feature requires a pre-trained model, but no model 
+          was found at:"),
+          
+          tags$code(
+            style = "display: block; background-color: #f5f5f5; padding: 10px; 
+                   margin: 10px 0; border-radius: 5px; font-size: 14px;",
+            model_path
+          ),
+          
+          hr(),
+          
+          h4("What would you like to do?"),
+          
+          tags$ol(
+            tags$li(strong("Train a new model"), " (Recommended) - Takes 5-10 minutes"),
+            tags$li(strong("Disable 'Use cached model'"), " option and predict again")
+          ),
+          
+          hr(),
+          
+          tags$div(
+            class = "alert alert-info",
+            style = "margin-top: 15px;",
+            icon("info-circle"),
+            " Once trained, the model will be saved for instant predictions in the future!"
+          )
         ),
-        modalButton("Cancel", icon = icon("times"))
-      ),
-      
-      size = "m",
-      easyClose = TRUE
-    ))
-    
-    append_log("ERROR: No cached model found")
-    append_log(paste0("  Path checked: ", model_path))
-    
-    return()
-  }
-  
-  # Continue with normal prediction flow...
-  progress <- Progress$new(session, min = 0, max = 1)
-  on.exit(progress$close())
-  progress$set(message = "Processing...", value = 0)
-  
-  if (input$use_cache && model_exists) {
-    
-    append_log("✓ Found cached model, loading...")
-    progress$set(value = 0.2, detail = "Loading model...")
-    
-    loaded <- load_crypto_model(symbol, MODEL_DIR)
-    
-    if (!is.null(loaded)) {
-      model <- loaded$model
-      metadata <- loaded$metadata
-      
-      append_log(paste0("  Model trained: ", metadata$trained_date))
-      append_log(paste0("  Test MAPE: ", round(metadata$test_mape, 2), "%"))
-      
-      # Download fresh data
-      progress$set(value = 0.4, detail = "Downloading latest data...")
-      crypto_df <- get_crypto_data(symbol)
-      
-      if (is.null(crypto_df)) {
-        showNotification("Failed to download data!", type = "error", duration = 5)
-        append_log("ERROR: Failed to download data")
-        return()
-      }
-      
-      append_log(paste0("✓ Downloaded ", nrow(crypto_df), " days of data"))
-      
-      # Add features
-      progress$set(value = 0.6, detail = "Calculating indicators...")
-      crypto_df <- add_technical_features(crypto_df)
-      
-      # Prepare data for prediction only
-      feature_cols <- get_feature_columns()
-      feature_data <- as.matrix(crypto_df[, feature_cols])
-      
-      # Use saved scaling params
-      scaling_params <- metadata$scaling_params
-      scaled_features <- matrix(0, nrow = nrow(feature_data), ncol = ncol(feature_data))
-      
-      for (i in 1:ncol(feature_data)) {
-        scaled_features[, i] <- (feature_data[, i] - scaling_params$mean[i]) / 
-          (scaling_params$sd[i] + 1e-8)
-      }
-      
-      scaled_features[scaled_features > 4] <- 4
-      scaled_features[scaled_features < -4] <- -4
-      scaled_features[is.na(scaled_features)] <- 0
-      scaled_features[is.infinite(scaled_features)] <- 0
-      
-      # Predict tomorrow
-      progress$set(value = 0.8, detail = "Predicting...")
-      
-      time_steps <- metadata$time_steps
-      latest_features <- tail(scaled_features, time_steps)
-      latest_sequence <- array(latest_features, dim = c(1, time_steps, ncol(scaled_features)))
-      
-      latest_date <- tail(crypto_df$Date, 1)
-      current_price <- tail(crypto_df$Close, 1)
-      
-      tomorrow_pct_scaled <- model %>% predict(latest_sequence, verbose = 0)
-      tomorrow_pct_raw <- as.numeric(tomorrow_pct_scaled) * metadata$target_sd + metadata$target_mean
-      tomorrow_pct_corrected <- tomorrow_pct_raw - metadata$systematic_bias
-      
-      tomorrow_price_raw <- current_price * (1 + tomorrow_pct_corrected / 100)
-      tomorrow_price <- max(current_price * 0.90, min(current_price * 1.10, tomorrow_price_raw))
-      
-      price_change <- tomorrow_price - current_price
-      pct_change <- (price_change / current_price) * 100
-      
-      direction_accuracy <- metadata$direction_accuracy
-      
-      confidence <- if (is.na(direction_accuracy)) {
-        "LOW"
-      } else if (direction_accuracy > 70) {
-        "HIGH"
-      } else if (direction_accuracy > 60) {
-        "MODERATE"
-      } else {
-        "LOW"
-      }
-      
-      signal <- if (abs(pct_change) < 0.5) {
-        "HOLD"
-      } else if (pct_change > 0) {
-        if (pct_change > 3 && confidence == "HIGH") "STRONG BUY" else if (pct_change > 1.5) "BUY" else "WEAK BUY"
-      } else {
-        if (pct_change < -3 && confidence == "HIGH") "STRONG SELL" else if (pct_change < -1.5) "SELL" else "WEAK SELL"
-      }
-      
-      progress$set(value = 1, detail = "Done!")
-      
-      # Store results
-      prediction_results(list(
-        latest_date = latest_date,
-        current_price = current_price,
-        tomorrow_price = tomorrow_price,
-        price_change = price_change,
-        pct_change = pct_change,
-        confidence = confidence,
-        signal = signal,
-        test_rmse = metadata$test_rmse,
-        test_mae = metadata$test_mae,
-        test_mape = metadata$test_mape,
-        direction_accuracy = direction_accuracy,
-        systematic_bias = metadata$systematic_bias,
-        history = metadata$history,
-        test_dates = NULL,
-        test_actual = NULL,
-        test_pred = NULL
+        
+        footer = tagList(
+          actionButton(
+            "start_training",
+            "Train New Model Now",
+            icon = icon("play"),
+            class = "btn-primary"
+          ),
+          modalButton("Cancel", icon = icon("times"))
+        ),
+        
+        size = "m",
+        easyClose = TRUE
       ))
       
-      append_log("✓ Prediction complete!")
-      append_log(paste0("  Tomorrow: $", round(tomorrow_price, 2), " (", round(pct_change, 2), "%)"))
-      append_log(paste0("  Signal: ", signal, " (", confidence, ")"))
+      append_log("ERROR: No cached model found")
+      append_log(paste0("  Path checked: ", model_path))
       
-      showNotification(
-        paste0("Quick prediction for ", crypto_name, " complete!"), 
-        type = "message",
-        duration = 3
-      )
+      return()
+    }
+  
+    progress <- Progress$new(session, min = 0, max = 1)
+    on.exit(progress$close())
+    progress$set(message = "Processing...", value = 0)
+    
+    if (input$use_cache && model_exists) {
+      
+      append_log("✓ Found cached model, loading...")
+      progress$set(value = 0.2, detail = "Loading model...")
+      
+      loaded <- load_crypto_model(symbol, MODEL_DIR)
+      
+      if (!is.null(loaded)) {
+        model <- loaded$model
+        metadata <- loaded$metadata
+        
+        append_log(paste0("  Model trained: ", metadata$trained_date))
+        append_log(paste0("  Test MAPE: ", round(metadata$test_mape, 2), "%"))
+        
+        # Download fresh data
+        progress$set(value = 0.4, detail = "Downloading latest data...")
+        crypto_df <- get_crypto_data(symbol)
+        
+        if (is.null(crypto_df)) {
+          showNotification("Failed to download data!", type = "error", duration = 5)
+          append_log("ERROR: Failed to download data")
+          return()
+        }
+        
+        append_log(paste0("✓ Downloaded ", nrow(crypto_df), " days of data"))
+        
+        # Add features
+        progress$set(value = 0.5, detail = "Calculating indicators...")
+        crypto_df <- add_technical_features(crypto_df)
+        
+        # Prepare data for prediction
+        feature_cols <- get_feature_columns()
+        feature_data <- as.matrix(crypto_df[, feature_cols])
+        
+        # Use saved scaling params
+        scaling_params <- metadata$scaling_params
+        scaled_features <- matrix(0, nrow = nrow(feature_data), ncol = ncol(feature_data))
+        
+        for (i in 1:ncol(feature_data)) {
+          scaled_features[, i] <- (feature_data[, i] - scaling_params$mean[i]) / 
+            (scaling_params$sd[i] + 1e-8)
+        }
+        
+        scaled_features[scaled_features > 4] <- 4
+        scaled_features[scaled_features < -4] <- -4
+        scaled_features[is.na(scaled_features)] <- 0
+        scaled_features[is.infinite(scaled_features)] <- 0
+        
+        # FIX: Generate test predictions for plotting
+        progress$set(value = 0.6, detail = "Generating test predictions...")
+        
+        time_steps <- metadata$time_steps
+        target_mean <- metadata$target_mean
+        target_sd <- metadata$target_sd
+        systematic_bias <- metadata$systematic_bias
+        
+        # Create sequences for last 30 days (test set for visualization)
+        test_size <- min(30, nrow(crypto_df) - time_steps - 1)
+        
+        # Generate predictions for test period
+        test_predictions <- c()
+        test_start_idx <- nrow(crypto_df) - test_size - time_steps
+        
+        for (i in test_start_idx:(test_start_idx + test_size - 1)) {
+          seq_features <- scaled_features[i:(i + time_steps - 1), ]
+          seq_array <- array(seq_features, dim = c(1, time_steps, ncol(scaled_features)))
+          
+          pred_scaled <- model %>% predict(seq_array, verbose = 0)
+          pred_pct <- as.numeric(pred_scaled) * target_sd + target_mean - systematic_bias
+          
+          current_price <- crypto_df$Close[i + time_steps - 1]
+          pred_price <- current_price * (1 + pred_pct / 100)
+          pred_price <- max(current_price * 0.90, min(current_price * 1.10, pred_price))
+          
+          test_predictions <- c(test_predictions, pred_price)
+        }
+        
+        # Get corresponding actual prices
+        test_dates <- crypto_df$Date[(test_start_idx + time_steps):(test_start_idx + time_steps + test_size - 1)]
+        test_actual <- crypto_df$Close[(test_start_idx + time_steps):(test_start_idx + time_steps + test_size - 1)]
+        
+        # Ensure equal lengths
+        min_len <- min(length(test_dates), length(test_actual), length(test_predictions))
+        test_dates <- test_dates[1:min_len]
+        test_actual <- test_actual[1:min_len]
+        test_predictions <- test_predictions[1:min_len]
+        
+        # Predict tomorrow
+        progress$set(value = 0.8, detail = "Predicting tomorrow...")
+        
+        latest_features <- tail(scaled_features, time_steps)
+        latest_sequence <- array(latest_features, dim = c(1, time_steps, ncol(scaled_features)))
+        
+        latest_date <- tail(crypto_df$Date, 1)
+        current_price <- tail(crypto_df$Close, 1)
+        
+        tomorrow_pct_scaled <- model %>% predict(latest_sequence, verbose = 0)
+        tomorrow_pct_raw <- as.numeric(tomorrow_pct_scaled) * target_sd + target_mean
+        tomorrow_pct_corrected <- tomorrow_pct_raw - systematic_bias
+        
+        tomorrow_price_raw <- current_price * (1 + tomorrow_pct_corrected / 100)
+        tomorrow_price <- max(current_price * 0.90, min(current_price * 1.10, tomorrow_price_raw))
+        
+        price_change <- tomorrow_price - current_price
+        pct_change <- (price_change / current_price) * 100
+        
+        direction_accuracy <- metadata$direction_accuracy
+        
+        confidence <- if (is.na(direction_accuracy)) {
+          "LOW"
+        } else if (direction_accuracy > 70) {
+          "HIGH"
+        } else if (direction_accuracy > 60) {
+          "MODERATE"
+        } else {
+          "LOW"
+        }
+        
+        signal <- if (abs(pct_change) < 0.5) {
+          "HOLD"
+        } else if (pct_change > 0) {
+          if (pct_change > 3 && confidence == "HIGH") "STRONG BUY" else if (pct_change > 1.5) "BUY" else "WEAK BUY"
+        } else {
+          if (pct_change < -3 && confidence == "HIGH") "STRONG SELL" else if (pct_change < -1.5) "SELL" else "WEAK SELL"
+        }
+        
+        progress$set(value = 1, detail = "Done!")
+        
+        # FIX: Store results WITH test data for plotting
+        prediction_results(list(
+          latest_date = latest_date,
+          current_price = current_price,
+          tomorrow_price = tomorrow_price,
+          price_change = price_change,
+          pct_change = pct_change,
+          confidence = confidence,
+          signal = signal,
+          test_rmse = metadata$test_rmse,
+          test_mae = metadata$test_mae,
+          test_mape = metadata$test_mape,
+          direction_accuracy = direction_accuracy,
+          systematic_bias = metadata$systematic_bias,
+          history = metadata$history,
+          test_dates = test_dates,        # FIX: Include test data
+          test_actual = test_actual,      # FIX: Include test data
+          test_pred = test_predictions    # FIX: Include test data
+        ))
+        
+        append_log("✓ Prediction complete!")
+        append_log(paste0("  Tomorrow: $", round(tomorrow_price, 2), " (", round(pct_change, 2), "%)"))
+        append_log(paste0("  Signal: ", signal, " (", confidence, ")"))
+        append_log(paste0("  Generated ", length(test_predictions), " test predictions for visualization"))
+        
+        showNotification(
+          paste0("Quick prediction for ", crypto_name, " complete!"), 
+          type = "message",
+          duration = 3
+        )
+        
+      } else {
+        showNotification("Failed to load cached model. Try training new model.", 
+                         type = "warning", duration = 5)
+        append_log("ERROR: Failed to load model")
+      }
       
     } else {
-      showNotification("Failed to load cached model. Try training new model.", 
-                      type = "warning", duration = 5)
-      append_log("ERROR: Failed to load model")
+      # No cache, train new model
+      append_log("No cached model found or cache disabled. Training new model...")
+      training_triggered$trigger <- TRUE
     }
-    
-  } else {
-    # No cache, train new model
-    append_log("No cached model found or cache disabled. Training new model...")
-    training_triggered$trigger <- TRUE
-  }
-})
+  })
 
 # Handle "Train New Model Now" button from dialog
 observeEvent(input$start_training, {
