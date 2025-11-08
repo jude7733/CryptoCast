@@ -1,7 +1,8 @@
 # ============================================
-# CRYPTO PRICE PREDICTION DASHBOARD
+# CONTINUAL LEARNING CRYPTO DASHBOARD
+# With multi-day forecasting and live price chart
+# ============================================
 
-# Load required libraries
 library(shiny)
 library(shinydashboard)
 library(shinyWidgets)
@@ -9,12 +10,11 @@ library(shinycssloaders)
 library(DT)
 library(plotly)
 
-
-# Source the functions file
 source("lstm_functions.R")
 
 # ============================================
 # CONFIGURATION
+# ============================================
 
 crypto_list <- c(
   "Bitcoin" = "BTC-USD",
@@ -31,58 +31,66 @@ crypto_list <- c(
 
 MODEL_DIR <- "models"
 
-# Create directories
 if (!dir.exists(MODEL_DIR)) dir.create(MODEL_DIR, recursive = TRUE)
 
 # ============================================
 # UI
+# ============================================
 
 ui <- dashboardPage(
   skin = "blue",
   
-  dashboardHeader(title = "Crypto Price Predictor", titleWidth = 300),
+  dashboardHeader(title = "Crypto Continual Learning", titleWidth = 320),
   
   dashboardSidebar(
-    width = 300,
+    width = 320,
     sidebarMenu(
-      menuItem("Prediction", tabName = "prediction", icon = icon("chart-line")),
-      menuItem("Model Training", tabName = "training", icon = icon("cogs")),
+      menuItem("Live Price & Forecast", tabName = "prediction", icon = icon("chart-line")),
+      menuItem("Model Info", tabName = "training", icon = icon("cogs")),
       menuItem("About", tabName = "about", icon = icon("info-circle"))
     ),
     
     br(),
     
     div(style = "padding: 15px;",
+        
         selectInput("crypto_select", 
-                    "Select Cryptocurrency:",
+                    "📊 Select Cryptocurrency:",
                     choices = crypto_list,
                     selected = "BTC-USD"),
         
-        actionButton("predict_btn", 
-                     "Quick Prediction",
-                     icon = icon("bolt"),
-                     class = "btn-primary btn-block",
-                     style = "margin-top: 10px; width: 250px;"),
+        hr(),
         
-        actionButton("train_btn", 
-                     "Train New Model",
-                     icon = icon("play"),
-                     class = "btn-warning btn-block",
-                     style = "margin-top: 10px; width: 250px;"),
+        sliderInput("forecast_days",
+                    "🔮 Forecast Horizon (Days):",
+                    min = 1,
+                    max = 30,
+                    value = 7,
+                    step = 1),
+        
+        sliderInput("epochs",
+                    "⚡ Training Epochs:",
+                    min = 20,
+                    max = 100,
+                    value = 50,
+                    step = 10),
         
         hr(),
         
-        p(strong("Status:"), style = "margin-bottom: 5px;"),
+        actionButton("train_predict_btn", 
+                     "Train & Predict",
+                     icon = icon("rocket"),
+                     class = "btn-success btn-block",
+                     style = "margin-top: 10px; font-size: 16px; padding: 10px;"),
+        
+        hr(),
+        
+        p(strong("📍 Status:"), style = "margin-bottom: 5px;"),
         verbatimTextOutput("status_text", placeholder = TRUE),
         
         hr(),
         
-        checkboxInput("use_cache", "Use cached model (faster)", value = TRUE),
-        
-        conditionalPanel(
-          condition = "input.use_cache == false",
-          numericInput("epochs", "Training Epochs:", value = 150, min = 50, max = 300, step = 50)
-        )
+        uiOutput("model_info_sidebar")
     )
   ),
   
@@ -91,27 +99,43 @@ ui <- dashboardPage(
       tags$style(HTML("
         .content-wrapper { background-color: #ecf0f5; }
         .box { border-top: 3px solid #3c8dbc; }
-        .value-box { font-size: 24px; font-weight: bold; }
-        .btn-primary { background-color: #3c8dbc; }
-        .btn-warning { background-color: #f39c12; }
+        .value-box { font-size: 22px; font-weight: bold; }
+        .btn-success { background-color: #28a745; border-color: #28a745; }
+        .btn-success:hover { background-color: #218838; }
       "))
     ),
     
     tabItems(
-      # Prediction tab
+      
+      # ============================================
+      # PREDICTION TAB
+      # ============================================
+      
       tabItem(
         tabName = "prediction",
         
-        fluidRow(
-          valueBoxOutput("current_price_box", width = 3),
-          valueBoxOutput("tomorrow_price_box", width = 3),
-          valueBoxOutput("change_box", width = 3),
-          valueBoxOutput("signal_box", width = 3)
-        ),
-        
+        # Live Price Chart (First)
         fluidRow(
           box(
-            title = "Tomorrow's Forecast Details",
+            title = "📈 Live Historical Price Chart",
+            status = "info",
+            solidHeader = TRUE,
+            width = 12,
+            withSpinner(plotlyOutput("live_price_plot", height = "450px"))
+          )
+        ),
+        
+        # Value Boxes
+        fluidRow(
+          valueBoxOutput("current_price_box", width = 4),
+          valueBoxOutput("forecast_price_box", width = 4),
+          valueBoxOutput("change_box", width = 4)
+        ),
+        
+        # Forecast Details and Metrics
+        fluidRow(
+          box(
+            title = "🔮 Multi-Day Forecast",
             status = "primary",
             solidHeader = TRUE,
             width = 6,
@@ -119,7 +143,7 @@ ui <- dashboardPage(
           ),
           
           box(
-            title = "Model Performance Metrics",
+            title = "📊 Model Performance",
             status = "info",
             solidHeader = TRUE,
             width = 6,
@@ -127,52 +151,58 @@ ui <- dashboardPage(
           )
         ),
         
+        # Forecast Chart
         fluidRow(
           box(
-            title = "Price Prediction Visualization",
-            status = "primary",
+            title = "📉 Forecast Visualization (Next N Days)",
+            status = "success",
             solidHeader = TRUE,
             width = 12,
-            withSpinner(plotlyOutput("prediction_plot", height = "400px"))
+            withSpinner(plotlyOutput("forecast_plot", height = "400px"))
           )
         ),
         
+        # Test Predictions and Trading Advice
         fluidRow(
           box(
-            title = "Training History",
-            status = "info",
+            title = "✅ Test Set Predictions",
+            status = "primary",
             solidHeader = TRUE,
-            width = 6,
-            withSpinner(plotlyOutput("training_plot", height = "300px"))
+            width = 7,
+            withSpinner(plotlyOutput("test_plot", height = "350px"))
           ),
           
           box(
-            title = "Trading Recommendation",
+            title = "💡 Trading Recommendation",
             status = "warning",
             solidHeader = TRUE,
-            width = 6,
+            width = 5,
             withSpinner(uiOutput("trading_advice"))
           )
         ),
         
+        # Training History
         fluidRow(
           box(
-            title = "Prediction Data Table",
-            status = "primary",
+            title = "📚 Training History",
+            status = "info",
             solidHeader = TRUE,
             width = 12,
-            withSpinner(DTOutput("prediction_table"))
+            withSpinner(plotlyOutput("training_plot", height = "300px"))
           )
         )
       ),
       
-      # Training tab
+      # ============================================
+      # TRAINING TAB
+      # ============================================
+      
       tabItem(
         tabName = "training",
         
         fluidRow(
           box(
-            title = "Available Models",
+            title = "💾 Saved Models",
             status = "info",
             solidHeader = TRUE,
             width = 12,
@@ -182,7 +212,7 @@ ui <- dashboardPage(
         
         fluidRow(
           box(
-            title = "Training Log",
+            title = "📝 Training Log",
             status = "primary",
             solidHeader = TRUE,
             width = 12,
@@ -191,7 +221,10 @@ ui <- dashboardPage(
         )
       ),
       
-      # About tab
+      # ============================================
+      # ABOUT TAB
+      # ============================================
+      
       tabItem(
         tabName = "about",
         box(
@@ -200,69 +233,50 @@ ui <- dashboardPage(
           solidHeader = TRUE,
           width = 12,
           HTML("
-            <h3>🚀 Cryptocurrency Price Prediction Dashboard</h3>
-            <p>Advanced LSTM-based cryptocurrency price forecasting with intelligent model caching.</p>
+            <h3>🚀 Continual Learning Cryptocurrency Forecaster</h3>
+            <p>Advanced LSTM-based cryptocurrency price forecasting with <strong>continual learning</strong>.</p>
             
             <h4>✨ Key Features:</h4>
             <ul>
-              <li><strong>Smart Caching:</strong> Trained models are saved and reused (prediction in <5 seconds)</li>
+              <li><strong>Continual Learning:</strong> Loads existing model and continues training with new data</li>
+              <li><strong>Multi-Day Forecasting:</strong> Predict 1-30 days into the future</li>
+              <li><strong>Live Price Chart:</strong> View complete historical data before forecasting</li>
               <li><strong>10 Cryptocurrencies:</strong> Bitcoin, Ethereum, and 8 other major coins</li>
               <li><strong>17 Technical Indicators:</strong> RSI, MACD, Bollinger Bands, volatility, volume, etc.</li>
-              <li><strong>Deep Learning:</strong> 2-layer LSTM with batch normalization and dropout</li>
-              <li><strong>Bias Correction:</strong> Systematic bias removed for better accuracy</li>
-              <li><strong>Trading Signals:</strong> Buy/Sell/Hold recommendations with confidence levels</li>
+              <li><strong>Faster Training:</strong> Continual learning requires fewer epochs (~30-50 vs 150)</li>
             </ul>
+            
+            <h4>🔄 How Continual Learning Works:</h4>
+            <ol>
+              <li><strong>First Time:</strong> Builds new model and trains from scratch (~10 min)</li>
+              <li><strong>Subsequent Runs:</strong> Loads saved model and continues training with new data (~2-3 min)</li>
+              <li><strong>Auto-Detection:</strong> System automatically detects if a model exists</li>
+            </ol>
             
             <h4>📖 How to Use:</h4>
             <ol>
-              <li><strong>Quick Prediction:</strong> Select a coin and click 'Quick Prediction'
-                <ul>
-                  <li>If model exists: Instant prediction (<5 sec)</li>
-                  <li>If new coin: Trains automatically (5-10 min first time)</li>
-                </ul>
-              </li>
-              <li><strong>Train New Model:</strong> Force retrain with latest data</li>
-              <li><strong>View Results:</strong> See price forecast, metrics, charts, and trading advice</li>
+              <li>Select cryptocurrency from dropdown</li>
+              <li>Choose forecast horizon (1-30 days)</li>
+              <li>Adjust training epochs (30-50 recommended)</li>
+              <li>Click <strong>'Train & Predict'</strong></li>
+              <li>View live price chart, forecast, and trading signals</li>
             </ol>
             
-            <h4>🧠 Model Architecture:</h4>
-            <table class='table table-bordered'>
-              <tr><th>Component</th><th>Details</th></tr>
-              <tr><td>Input</td><td>Past 30 days × 17 features</td></tr>
-              <tr><td>LSTM Layer 1</td><td>96 units + Batch Norm + Dropout (30%)</td></tr>
-              <tr><td>LSTM Layer 2</td><td>48 units + Batch Norm + Dropout (30%)</td></tr>
-              <tr><td>Dense Layers</td><td>32 → 16 units with L2 regularization</td></tr>
-              <tr><td>Output</td><td>Tomorrow's % price change</td></tr>
-              <tr><td>Training</td><td>Max 150 epochs with early stopping</td></tr>
-              <tr><td>Optimizer</td><td>Adam (LR: 0.0001, gradient clipping)</td></tr>
-            </table>
-            
-            <h4>📊 Performance Metrics:</h4>
+            <h4>⏱️ Training Time:</h4>
             <ul>
-              <li><strong>RMSE:</strong> Root Mean Squared Error in USD</li>
-              <li><strong>MAE:</strong> Mean Absolute Error in USD</li>
-              <li><strong>MAPE:</strong> Mean Absolute Percentage Error</li>
-              <li><strong>Direction Accuracy:</strong> % of correct up/down predictions</li>
-            </ul>
-            
-            <h4>💡 Tips:</h4>
-            <ul>
-              <li>Use <strong>cached models</strong> for instant predictions</li>
-              <li>Train new models weekly to include latest market data</li>
-              <li>Higher direction accuracy (>65%) = more reliable signals</li>
-              <li>Confidence level indicates prediction reliability</li>
+              <li><strong>First Training:</strong> 8-12 minutes</li>
+              <li><strong>Continual Learning:</strong> 2-4 minutes</li>
+              <li><strong>Time Savings:</strong> ~70% faster with continual learning!</li>
             </ul>
             
             <h4>⚠️ Disclaimer:</h4>
             <div class='alert alert-danger'>
-              <strong>NOT FINANCIAL ADVICE!</strong> This tool is for educational purposes only. 
-              Cryptocurrency trading is highly risky. Always do your own research and never invest 
-              more than you can afford to lose.
+              <strong>NOT FINANCIAL ADVICE!</strong> For educational purposes only.
             </div>
             
             <hr>
             <p><em>Built with R Shiny, Keras3, TensorFlow, and quantmod</em></p>
-            <p><small>Version 2.0 | Last updated: October 2025</small></p>
+            <p><small>Version 3.0 - Continual Learning Edition | November 2025</small></p>
           ")
         )
       )
@@ -271,331 +285,137 @@ ui <- dashboardPage(
 )
 
 # ============================================
-# SERVER
+# SERVER (FIXED - No infinite loops!)
+# ============================================
 
 server <- function(input, output, session) {
   
   # Reactive values
   prediction_results <- reactiveVal(NULL)
-  training_log_text <- reactiveVal("Ready to train or predict.\n")
+  training_log_text <- reactiveVal("Ready to train.\n")
+  live_data <- reactiveVal(NULL)
   
-  # Helper function to append log
+  # Append log
   append_log <- function(text) {
     current_log <- training_log_text()
     training_log_text(paste0(current_log, text, "\n"))
   }
   
+  
+  observeEvent(input$crypto_select, {
+    symbol <- input$crypto_select
+    crypto_name <- names(crypto_list)[crypto_list == symbol]
+    
+    # Show loading message
+    append_log(paste0("📊 Loading data for ", crypto_name, "..."))
+    
+    tryCatch({
+      data <- get_crypto_data(symbol)
+      
+      if (!is.null(data)) {
+        live_data(data)
+        append_log(paste0("✓ Loaded ", nrow(data), " days of data"))
+      } else {
+        append_log("✗ Failed to load data")
+      }
+    }, error = function(e) {
+      append_log(paste0("ERROR: ", e$message))
+    })
+  }, ignoreInit = FALSE)
+  
   # Status text
   output$status_text <- renderText({
     results <- prediction_results()
+    symbol <- input$crypto_select
+    model_path <- file.path(MODEL_DIR, paste0(symbol, "_model.keras"))
+    
     if (is.null(results)) {
-      "Ready to predict"
+      if (file.exists(model_path)) {
+        "✅ Model exists\n🔄 Ready for continual learning"
+      } else {
+        "🆕 No model found\n⚡ Will train from scratch"
+      }
     } else {
-      paste("Last updated:", format(Sys.time(), "%H:%M:%S"))
+      paste0("✅ Last trained:\n", format(Sys.time(), "%Y-%m-%d %H:%M:%S"))
     }
   })
   
-  # Check if model exists
-  model_exists <- reactive({
+  # Model info sidebar
+  output$model_info_sidebar <- renderUI({
     symbol <- input$crypto_select
-    model_path <- file.path(MODEL_DIR, paste0(symbol, "_modal.keras"))
-    metadata_path <- file.path(MODEL_DIR, paste0(symbol, "_metadata.rds"))
-    
-    file.exists(model_path) && file.exists(metadata_path)
-  })
-  
-  # ============================================
-  # QUICK PREDICTION (Use cached model if available)
-  
-  observeEvent(input$predict_btn, {
-    
-    symbol <- input$crypto_select
-    crypto_name <- names(crypto_list)[crypto_list == symbol]
-    
-    append_log(paste0("\n========== QUICK PREDICTION: ", crypto_name, " =========="))
-    append_log(paste0("Time: ", Sys.time()))
-    
-    # Check for cached model FIRST
     model_path <- file.path(MODEL_DIR, paste0(symbol, "_model.keras"))
     metadata_path <- file.path(MODEL_DIR, paste0(symbol, "_metadata.rds"))
     
-    model_exists <- file.exists(model_path) && file.exists(metadata_path)
-    
-    if (input$use_cache && !model_exists) {
-      
-      showModal(modalDialog(
-        title = tags$div(
-          icon("exclamation-triangle", style = "color: orange;"),
-          " No Trained Model Found"
-        ),
+    if (file.exists(model_path) && file.exists(metadata_path)) {
+      tryCatch({
+        meta <- readRDS(metadata_path)
         
         tags$div(
-          style = "font-size: 16px;",
-          
-          p(strong(paste0("No saved model found for ", crypto_name))),
-          
-          p("The quick prediction feature requires a pre-trained model, but no model 
-          was found at:"),
-          
-          tags$code(
-            style = "display: block; background-color: #f5f5f5; padding: 10px; 
-                   margin: 10px 0; border-radius: 5px; font-size: 14px;",
-            model_path
-          ),
-          
-          hr(),
-          
-          h4("What would you like to do?"),
-          
-          tags$ol(
-            tags$li(strong("Train a new model"), " (Recommended) - Takes 5-10 minutes"),
-            tags$li(strong("Disable 'Use cached model'"), " option and predict again")
-          ),
-          
-          hr(),
-          
-          tags$div(
-            class = "alert alert-info",
-            style = "margin-top: 15px;",
-            icon("info-circle"),
-            " Once trained, the model will be saved for instant predictions in the future!"
-          )
-        ),
-        
-        footer = tagList(
-          actionButton(
-            "start_training",
-            "Train New Model Now",
-            icon = icon("play"),
-            class = "btn-primary"
-          ),
-          modalButton("Cancel", icon = icon("times"))
-        ),
-        
-        size = "m",
-        easyClose = TRUE
-      ))
-      
-      append_log("ERROR: No cached model found")
-      append_log(paste0("  Path checked: ", model_path))
-      
-      return()
-    }
-  
-    progress <- Progress$new(session, min = 0, max = 1)
-    on.exit(progress$close())
-    progress$set(message = "Processing...", value = 0)
-    
-    if (input$use_cache && model_exists) {
-      
-      append_log("✓ Found cached model, loading...")
-      progress$set(value = 0.2, detail = "Loading model...")
-      
-      loaded <- load_crypto_model(symbol, MODEL_DIR)
-      
-      if (!is.null(loaded)) {
-        model <- loaded$model
-        metadata <- loaded$metadata
-        
-        append_log(paste0("  Model trained: ", metadata$trained_date))
-        append_log(paste0("  Test MAPE: ", round(metadata$test_mape, 2), "%"))
-        
-        # Download fresh data
-        progress$set(value = 0.4, detail = "Downloading latest data...")
-        crypto_df <- get_crypto_data(symbol)
-        
-        if (is.null(crypto_df)) {
-          showNotification("Failed to download data!", type = "error", duration = 5)
-          append_log("ERROR: Failed to download data")
-          return()
-        }
-        
-        append_log(paste0("✓ Downloaded ", nrow(crypto_df), " days of data"))
-        
-        # Add features
-        progress$set(value = 0.5, detail = "Calculating indicators...")
-        crypto_df <- add_technical_features(crypto_df)
-        
-        # Prepare data for prediction
-        feature_cols <- get_feature_columns()
-        feature_data <- as.matrix(crypto_df[, feature_cols])
-        
-        # Use saved scaling params
-        scaling_params <- metadata$scaling_params
-        scaled_features <- matrix(0, nrow = nrow(feature_data), ncol = ncol(feature_data))
-        
-        for (i in 1:ncol(feature_data)) {
-          scaled_features[, i] <- (feature_data[, i] - scaling_params$mean[i]) / 
-            (scaling_params$sd[i] + 1e-8)
-        }
-        
-        scaled_features[scaled_features > 4] <- 4
-        scaled_features[scaled_features < -4] <- -4
-        scaled_features[is.na(scaled_features)] <- 0
-        scaled_features[is.infinite(scaled_features)] <- 0
-        
-        # FIX: Generate test predictions for plotting
-        progress$set(value = 0.6, detail = "Generating test predictions...")
-        
-        time_steps <- metadata$time_steps
-        target_mean <- metadata$target_mean
-        target_sd <- metadata$target_sd
-        systematic_bias <- metadata$systematic_bias
-        
-        # Create sequences for last 30 days (test set for visualization)
-        test_size <- min(30, nrow(crypto_df) - time_steps - 1)
-        
-        # Generate predictions for test period
-        test_predictions <- c()
-        test_start_idx <- nrow(crypto_df) - test_size - time_steps
-        
-        for (i in test_start_idx:(test_start_idx + test_size - 1)) {
-          seq_features <- scaled_features[i:(i + time_steps - 1), ]
-          seq_array <- array(seq_features, dim = c(1, time_steps, ncol(scaled_features)))
-          
-          pred_scaled <- model %>% predict(seq_array, verbose = 0)
-          pred_pct <- as.numeric(pred_scaled) * target_sd + target_mean - systematic_bias
-          
-          current_price <- crypto_df$Close[i + time_steps - 1]
-          pred_price <- current_price * (1 + pred_pct / 100)
-          pred_price <- max(current_price * 0.90, min(current_price * 1.10, pred_price))
-          
-          test_predictions <- c(test_predictions, pred_price)
-        }
-        
-        # Get corresponding actual prices
-        test_dates <- crypto_df$Date[(test_start_idx + time_steps):(test_start_idx + time_steps + test_size - 1)]
-        test_actual <- crypto_df$Close[(test_start_idx + time_steps):(test_start_idx + time_steps + test_size - 1)]
-        
-        # Ensure equal lengths
-        min_len <- min(length(test_dates), length(test_actual), length(test_predictions))
-        test_dates <- test_dates[1:min_len]
-        test_actual <- test_actual[1:min_len]
-        test_predictions <- test_predictions[1:min_len]
-        
-        # Predict tomorrow
-        progress$set(value = 0.8, detail = "Predicting tomorrow...")
-        
-        latest_features <- tail(scaled_features, time_steps)
-        latest_sequence <- array(latest_features, dim = c(1, time_steps, ncol(scaled_features)))
-        
-        latest_date <- tail(crypto_df$Date, 1)
-        current_price <- tail(crypto_df$Close, 1)
-        
-        tomorrow_pct_scaled <- model %>% predict(latest_sequence, verbose = 0)
-        tomorrow_pct_raw <- as.numeric(tomorrow_pct_scaled) * target_sd + target_mean
-        tomorrow_pct_corrected <- tomorrow_pct_raw - systematic_bias
-        
-        tomorrow_price_raw <- current_price * (1 + tomorrow_pct_corrected / 100)
-        tomorrow_price <- max(current_price * 0.90, min(current_price * 1.10, tomorrow_price_raw))
-        
-        price_change <- tomorrow_price - current_price
-        pct_change <- (price_change / current_price) * 100
-        
-        direction_accuracy <- metadata$direction_accuracy
-        
-        confidence <- if (is.na(direction_accuracy)) {
-          "LOW"
-        } else if (direction_accuracy > 70) {
-          "HIGH"
-        } else if (direction_accuracy > 60) {
-          "MODERATE"
-        } else {
-          "LOW"
-        }
-        
-        signal <- if (abs(pct_change) < 0.5) {
-          "HOLD"
-        } else if (pct_change > 0) {
-          if (pct_change > 3 && confidence == "HIGH") "STRONG BUY" else if (pct_change > 1.5) "BUY" else "WEAK BUY"
-        } else {
-          if (pct_change < -3 && confidence == "HIGH") "STRONG SELL" else if (pct_change < -1.5) "SELL" else "WEAK SELL"
-        }
-        
-        progress$set(value = 1, detail = "Done!")
-        
-        # FIX: Store results WITH test data for plotting
-        prediction_results(list(
-          latest_date = latest_date,
-          current_price = current_price,
-          tomorrow_price = tomorrow_price,
-          price_change = price_change,
-          pct_change = pct_change,
-          confidence = confidence,
-          signal = signal,
-          test_rmse = metadata$test_rmse,
-          test_mae = metadata$test_mae,
-          test_mape = metadata$test_mape,
-          direction_accuracy = direction_accuracy,
-          systematic_bias = metadata$systematic_bias,
-          history = metadata$history,
-          test_dates = test_dates,        # FIX: Include test data
-          test_actual = test_actual,      # FIX: Include test data
-          test_pred = test_predictions    # FIX: Include test data
-        ))
-        
-        append_log("✓ Prediction complete!")
-        append_log(paste0("  Tomorrow: $", round(tomorrow_price, 2), " (", round(pct_change, 2), "%)"))
-        append_log(paste0("  Signal: ", signal, " (", confidence, ")"))
-        append_log(paste0("  Generated ", length(test_predictions), " test predictions for visualization"))
-        
-        showNotification(
-          paste0("Quick prediction for ", crypto_name, " complete!"), 
-          type = "message",
-          duration = 3
+          class = "alert alert-success",
+          style = "padding: 10px; font-size: 13px;",
+          icon("check-circle"),
+          strong(" Saved Model Found"),
+          br(),
+          "Trained: ", format(meta$trained_date, "%Y-%m-%d"),
+          br(),
+          "MAPE: ", round(meta$test_mape, 2), "%",
+          br(),
+          "Dir. Acc: ", round(meta$direction_accuracy, 1), "%"
         )
-        
-      } else {
-        showNotification("Failed to load cached model. Try training new model.", 
-                         type = "warning", duration = 5)
-        append_log("ERROR: Failed to load model")
-      }
-      
+      }, error = function(e) {
+        tags$div(
+          class = "alert alert-warning",
+          style = "padding: 10px; font-size: 13px;",
+          icon("exclamation-triangle"),
+          "Model metadata corrupted"
+        )
+      })
     } else {
-      # No cache, train new model
-      append_log("No cached model found or cache disabled. Training new model...")
-      training_triggered$trigger <- TRUE
+      tags$div(
+        class = "alert alert-info",
+        style = "padding: 10px; font-size: 13px;",
+        icon("info-circle"),
+        strong(" No Model Yet"),
+        br(),
+        "Will train from scratch"
+      )
     }
   })
-
-# Handle "Train New Model Now" button from dialog
-observeEvent(input$start_training, {
-  removeModal()  # Close the dialog
-  
-  # Trigger training
-  training_triggered$trigger <- TRUE
-  
-  # Show notification
-  showNotification(
-    "Starting training process...",
-    type = "message",
-    duration = 3
-  )
-})
   
   # ============================================
-  # TRAIN NEW MODEL
+  # TRAIN & PREDICT (MAIN LOGIC)
+  # ============================================
   
-  training_triggered <- reactiveValues(trigger = FALSE)
-  
-  observeEvent(c(input$train_btn, training_triggered$trigger), {
-    
-    if (!input$train_btn && !training_triggered$trigger) return()
-    training_triggered$trigger <- FALSE
+  observeEvent(input$train_predict_btn, {
     
     symbol <- input$crypto_select
     crypto_name <- names(crypto_list)[crypto_list == symbol]
+    n_days <- input$forecast_days
+    epochs <- input$epochs
     
-    append_log(paste0("\n========== TRAINING NEW MODEL: ", crypto_name, " =========="))
+    append_log(paste0("\n========== TRAINING: ", crypto_name, " =========="))
+    append_log(paste0("Forecast: ", n_days, " days | Epochs: ", epochs))
     append_log(paste0("Time: ", Sys.time()))
     
     progress <- Progress$new(session, min = 0, max = 1)
     on.exit(progress$close())
-    progress$set(message = "Training model...", value = 0)
+    
+    # Check if model exists
+    model_path <- file.path(MODEL_DIR, paste0(symbol, "_model.keras"))
+    model_exists <- file.exists(model_path)
+    
+    is_continual <- model_exists
+    
+    if (is_continual) {
+      append_log("🔄 CONTINUAL LEARNING MODE")
+      append_log("  Loading existing model...")
+    } else {
+      append_log("🆕 TRAINING FROM SCRATCH")
+    }
     
     # Download data
-    progress$set(value = 0.05, detail = "Downloading data...")
-    append_log("Downloading data...")
+    progress$set(value = 0.05, message = "Downloading data...")
+    append_log("Downloading latest data...")
     
     crypto_df <- get_crypto_data(symbol)
     
@@ -605,103 +425,178 @@ observeEvent(input$start_training, {
       return()
     }
     
-    append_log(paste0("✓ Downloaded ", nrow(crypto_df), " days of data"))
+    append_log(paste0("✓ Downloaded ", nrow(crypto_df), " days"))
     
     # Add features
-    progress$set(value = 0.1, detail = "Calculating technical indicators...")
+    progress$set(value = 0.1, message = "Calculating indicators...")
     append_log("Calculating 17 technical indicators...")
     
     crypto_df <- add_technical_features(crypto_df)
-    append_log(paste0("✓ Features added, clean data: ", nrow(crypto_df), " rows"))
+    append_log(paste0("✓ Clean data: ", nrow(crypto_df), " rows"))
     
     # Prepare data
-    progress$set(value = 0.15, detail = "Preparing LSTM data...")
-    append_log("Preparing sequences for LSTM...")
+    progress$set(value = 0.15, message = "Preparing sequences...")
+    append_log("Preparing LSTM sequences...")
     
     feature_cols <- get_feature_columns()
     data_prep <- prepare_lstm_data(crypto_df, feature_cols, time_steps = 30, test_size = 30)
     
-    append_log(paste0("✓ Created ", dim(data_prep$X_train)[1], " training samples"))
-    append_log(paste0("✓ Created ", dim(data_prep$X_test)[1], " test samples"))
+    append_log(paste0("✓ Train samples: ", dim(data_prep$X_train)[1]))
+    append_log(paste0("✓ Test samples: ", dim(data_prep$X_test)[1]))
     
-    # Build model
-    progress$set(value = 0.2, detail = "Building LSTM model...")
-    append_log("Building LSTM architecture...")
+    # Build or load model
+    progress$set(value = 0.2, message = "Loading/building model...")
     
-    model <- build_lstm_model(data_prep$time_steps, length(feature_cols))
-    append_log("✓ Model built: 2 LSTM layers + dense layers")
+    if (is_continual) {
+      append_log("Loading saved model...")
+      loaded <- load_crypto_model(symbol, MODEL_DIR)
+      
+      if (!is.null(loaded)) {
+        model <- loaded$model
+        old_meta <- loaded$metadata
+        append_log(paste0("✓ Model loaded (last trained: ", format(old_meta$trained_date, "%Y-%m-%d"), ")"))
+      } else {
+        append_log("✗ Failed to load model, training from scratch")
+        model <- build_lstm_model(data_prep$time_steps, length(feature_cols))
+        is_continual <- FALSE
+      }
+    } else {
+      append_log("Building new LSTM model...")
+      model <- build_lstm_model(data_prep$time_steps, length(feature_cols))
+      append_log("✓ Model built: 2 LSTM + dense layers")
+    }
     
     # Train model
-    progress$set(value = 0.25, detail = "Training (this takes 5-10 min)...")
-    append_log(paste0("Training for max ", input$epochs, " epochs..."))
-    append_log("(This will take 5-10 minutes)")
+    if (is_continual) {
+      progress$set(value = 0.25, message = "Continual learning (2-4 min)...")
+      append_log(paste0("Fine-tuning with ", epochs, " epochs..."))
+      append_log("(Estimated: 2-4 minutes)")
+    } else {
+      progress$set(value = 0.25, message = "Training from scratch (8-12 min)...")
+      append_log(paste0("Training ", epochs, " epochs..."))
+      append_log("(Estimated: 8-12 minutes)")
+    }
     
     start_time <- Sys.time()
     
-    history <- train_lstm_model(model, data_prep$X_train, data_prep$y_train, 
-                                epochs = input$epochs, batch_size = 32)
+    history <- train_or_continue_model(
+      model = model,
+      X_train = data_prep$X_train,
+      y_train = data_prep$y_train,
+      epochs = epochs,
+      batch_size = 32,
+      is_continual = is_continual
+    )
     
     end_time <- Sys.time()
     training_time <- difftime(end_time, start_time, units = "mins")
     
-    append_log(paste0("✓ Training completed in ", round(training_time, 2), " minutes"))
+    append_log(paste0("✓ Training complete in ", round(training_time, 2), " min"))
     append_log(paste0("  Epochs: ", length(history$metrics$loss)))
     append_log(paste0("  Final loss: ", round(tail(history$metrics$loss, 1), 6)))
     
     # Evaluate
-    progress$set(value = 0.9, detail = "Evaluating performance...")
-    append_log("Evaluating model performance...")
+    progress$set(value = 0.9, message = "Evaluating...")
+    append_log("Evaluating performance...")
     
     evaluation <- evaluate_model(model, data_prep, crypto_df)
     
-    append_log("✓ Evaluation complete:")
+    append_log("✓ Metrics:")
     append_log(paste0("  RMSE: $", round(evaluation$test_rmse, 2)))
     append_log(paste0("  MAE: $", round(evaluation$test_mae, 2)))
     append_log(paste0("  MAPE: ", round(evaluation$test_mape, 2), "%"))
-    append_log(paste0("  Direction Accuracy: ", round(evaluation$direction_accuracy, 2), "%"))
+    append_log(paste0("  Direction: ", round(evaluation$direction_accuracy, 2), "%"))
     
-    # Predict tomorrow
-    progress$set(value = 0.95, detail = "Predicting tomorrow...")
-    append_log("Predicting tomorrow's price...")
+    # Multi-day forecast
+    progress$set(value = 0.95, message = "Forecasting...")
+    append_log(paste0("Forecasting next ", n_days, " days..."))
     
-    tomorrow <- predict_tomorrow(model, data_prep, crypto_df, evaluation)
+    latest_date <- tail(crypto_df$Date, 1)
+    current_price <- tail(crypto_df$Close, 1)
     
-    append_log("✓ Tomorrow's forecast:")
-    append_log(paste0("  Price: $", round(tomorrow$tomorrow_price, 2)))
-    append_log(paste0("  Change: ", round(tomorrow$pct_change, 2), "%"))
-    append_log(paste0("  Signal: ", tomorrow$signal, " (", tomorrow$confidence, ")"))
+    forecast_prices <- predict_multi_day(
+      model = model,
+      scaled_features = data_prep$scaled_features,
+      time_steps = data_prep$time_steps,
+      n_days = n_days,
+      target_mean = data_prep$target_mean,
+      target_sd = data_prep$target_sd,
+      systematic_bias = evaluation$systematic_bias,
+      current_price = current_price
+    )
+    
+    forecast_dates <- seq.Date(latest_date + 1, by = "day", length.out = n_days)
+    
+    final_price <- forecast_prices[n_days]
+    total_change <- final_price - current_price
+    total_pct_change <- (total_change / current_price) * 100
+    
+    # Confidence & Signal
+    direction_accuracy <- evaluation$direction_accuracy
+    
+    confidence <- if (is.na(direction_accuracy)) {
+      "LOW"
+    } else if (direction_accuracy > 70) {
+      "HIGH"
+    } else if (direction_accuracy > 60) {
+      "MODERATE"
+    } else {
+      "LOW"
+    }
+    
+    signal <- if (abs(total_pct_change) < 0.5) {
+      "HOLD"
+    } else if (total_pct_change > 0) {
+      if (total_pct_change > 5 && confidence == "HIGH") "STRONG BUY" 
+      else if (total_pct_change > 2) "BUY" 
+      else "WEAK BUY"
+    } else {
+      if (total_pct_change < -5 && confidence == "HIGH") "STRONG SELL" 
+      else if (total_pct_change < -2) "SELL" 
+      else "WEAK SELL"
+    }
+    
+    append_log("✓ Forecast:")
+    append_log(paste0("  Day ", n_days, ": $", round(final_price, 2)))
+    append_log(paste0("  Total change: ", round(total_pct_change, 2), "%"))
+    append_log(paste0("  Signal: ", signal, " (", confidence, ")"))
     
     # Save model
-    append_log("Saving trained model...")
+    append_log("Saving model...")
     save_crypto_model(model, data_prep, evaluation, history, symbol, MODEL_DIR)
-    append_log("✓ Model saved successfully")
+    append_log("✓ Model saved")
     
-    progress$set(value = 1, detail = "Done!")
+    progress$set(value = 1, message = "Done!")
     
-    # Store complete results
+    # Store results
     prediction_results(list(
-      latest_date = tomorrow$latest_date,
-      current_price = tomorrow$current_price,
-      tomorrow_price = tomorrow$tomorrow_price,
-      price_change = tomorrow$price_change,
-      pct_change = tomorrow$pct_change,
-      confidence = tomorrow$confidence,
-      signal = tomorrow$signal,
+      latest_date = latest_date,
+      current_price = current_price,
+      forecast_prices = forecast_prices,
+      forecast_dates = forecast_dates,
+      final_price = final_price,
+      total_change = total_change,
+      total_pct_change = total_pct_change,
+      confidence = confidence,
+      signal = signal,
       test_rmse = evaluation$test_rmse,
       test_mae = evaluation$test_mae,
       test_mape = evaluation$test_mape,
-      direction_accuracy = evaluation$direction_accuracy,
+      direction_accuracy = direction_accuracy,
       systematic_bias = evaluation$systematic_bias,
       history = history,
       test_dates = evaluation$test_dates,
       test_actual = evaluation$test_actual,
-      test_pred = evaluation$test_pred
+      test_pred = evaluation$test_pred,
+      n_days = n_days,
+      is_continual = is_continual,
+      training_time = training_time
     ))
     
-    append_log("\n========== TRAINING COMPLETE ==========\n")
+    append_log("\n========== COMPLETE ==========\n")
     
     showNotification(
-      paste0("Model trained successfully for ", crypto_name, "!"),
+      paste0("✓ ", crypto_name, " forecast complete! (", round(training_time, 1), " min)"),
       type = "message",
       duration = 5
     )
@@ -709,6 +604,7 @@ observeEvent(input$start_training, {
   
   # ============================================
   # OUTPUTS - Value Boxes
+  # ============================================
   
   output$current_price_box <- renderValueBox({
     results <- prediction_results()
@@ -717,22 +613,22 @@ observeEvent(input$start_training, {
     } else {
       valueBox(
         paste0("$", format(round(results$current_price, 2), big.mark = ",")),
-        "Current Price",
+        paste("Current Price", format(results$latest_date, "(%Y-%m-%d)")),
         icon = icon("dollar-sign"),
         color = "blue"
       )
     }
   })
   
-  output$tomorrow_price_box <- renderValueBox({
+  output$forecast_price_box <- renderValueBox({
     results <- prediction_results()
     if (is.null(results)) {
-      valueBox("--", "Tomorrow's Price", icon = icon("eye"), color = "purple")
+      valueBox("--", "Forecast Price", icon = icon("crystal-ball"), color = "purple")
     } else {
       valueBox(
-        paste0("$", format(round(results$tomorrow_price, 2), big.mark = ",")),
-        "Tomorrow's Price",
-        icon = icon("eye"),
+        paste0("$", format(round(results$final_price, 2), big.mark = ",")),
+        paste0("+", results$n_days, " Days Forecast"),
+        icon = icon("crystal-ball"),
         color = "purple"
       )
     }
@@ -743,57 +639,101 @@ observeEvent(input$start_training, {
     if (is.null(results)) {
       valueBox("--", "Expected Change", icon = icon("chart-line"), color = "yellow")
     } else {
-      color <- if (results$pct_change > 0) "green" else if (results$pct_change < 0) "red" else "yellow"
-      icon_name <- if (results$pct_change > 0) "arrow-up" else if (results$pct_change < 0) "arrow-down" else "minus"
+      color <- if (results$total_pct_change > 0) "green" 
+      else if (results$total_pct_change < 0) "red" 
+      else "yellow"
+      
+      icon_name <- if (results$total_pct_change > 0) "arrow-up" 
+      else if (results$total_pct_change < 0) "arrow-down" 
+      else "minus"
       
       valueBox(
-        paste0(ifelse(results$pct_change > 0, "+", ""), round(results$pct_change, 2), "%"),
-        "Expected Change",
+        paste0(ifelse(results$total_pct_change > 0, "+", ""), 
+               round(results$total_pct_change, 2), "%"),
+        paste0(results$signal, " (", results$confidence, ")"),
         icon = icon(icon_name),
         color = color
       )
     }
   })
   
-  output$signal_box <- renderValueBox({
-    results <- prediction_results()
-    if (is.null(results)) {
-      valueBox("--", "Signal", icon = icon("signal"), color = "light-blue")
-    } else {
-      color <- if (grepl("BUY", results$signal)) "green" else if (grepl("SELL", results$signal)) "red" else "yellow"
-      
-      valueBox(
-        results$signal,
-        paste("Confidence:", results$confidence),
-        icon = icon("signal"),
-        color = color
-      )
+  # ============================================
+  # OUTPUTS - Live Price Chart
+  # ============================================
+  
+  output$live_price_plot <- renderPlotly({
+    data <- live_data()
+    
+    if (is.null(data) || nrow(data) == 0) {
+      return(plotly_empty() %>% 
+               layout(title = "Waiting for data..."))
     }
+    
+    plot_ly(data, x = ~Date, y = ~Close, type = "scatter", mode = "lines",
+            line = list(color = "#1f77b4", width = 2),
+            name = "Close Price") %>%
+      add_trace(y = ~High, name = "High", 
+                line = list(color = "rgba(76,175,80,0.3)", width = 1, dash = "dot")) %>%
+      add_trace(y = ~Low, name = "Low",
+                line = list(color = "rgba(244,67,54,0.3)", width = 1, dash = "dot")) %>%
+      layout(
+        title = list(text = paste0("Historical Price - ", input$crypto_select), font = list(size = 18)),
+        xaxis = list(title = "Date"),
+        yaxis = list(title = "Price (USD)", tickformat = "$,.0f"),
+        hovermode = "x unified",
+        legend = list(x = 0.02, y = 0.98)
+      )
   })
   
   # ============================================
-  # OUTPUTS - Details
+  # OUTPUTS - Forecast Details
+  # ============================================
   
   output$forecast_details <- renderUI({
     results <- prediction_results()
     if (is.null(results)) {
-      return(HTML("<p>Run a prediction to see forecast details...</p>"))
+      return(HTML("<p>Click 'Train & Predict' to generate forecast...</p>"))
     }
     
+    forecast_table <- data.frame(
+      Day = 1:results$n_days,
+      Date = format(results$forecast_dates, "%Y-%m-%d"),
+      Price = paste0("$", format(round(results$forecast_prices, 2), big.mark = ",")),
+      Change = paste0(ifelse(results$forecast_prices > c(results$current_price, results$forecast_prices[-results$n_days]), "+", ""),
+                      round((results$forecast_prices - c(results$current_price, results$forecast_prices[-results$n_days])) / 
+                              c(results$current_price, results$forecast_prices[-results$n_days]) * 100, 2), "%")
+    )
+    
     HTML(paste0("
-      <table class='table table-striped'>
-        <tr><th>Metric</th><th>Value</th></tr>
-        <tr><td>Date</td><td>", as.character(results$latest_date + 1), "</td></tr>
-        <tr><td>Current Price</td><td>$", format(round(results$current_price, 2), big.mark = ","), "</td></tr>
-        <tr><td>Predicted Price</td><td>$", format(round(results$tomorrow_price, 2), big.mark = ","), "</td></tr>
-        <tr><td>Price Change</td><td>$", format(round(results$price_change, 2), big.mark = ","), "</td></tr>
-        <tr><td>% Change</td><td>", round(results$pct_change, 2), "%</td></tr>
-        <tr><td>Signal</td><td><strong>", results$signal, "</strong></td></tr>
-        <tr><td>Confidence</td><td>", results$confidence, "</td></tr>
-        <tr><td>Bias Correction</td><td>", round(results$systematic_bias, 3), "%</td></tr>
-      </table>
+      <div style='max-height: 400px; overflow-y: auto;'>
+        <table class='table table-striped table-sm'>
+          <thead>
+            <tr>
+              <th>Day</th>
+              <th>Date</th>
+              <th>Predicted Price</th>
+              <th>Daily Change</th>
+            </tr>
+          </thead>
+          <tbody>",
+                paste0(apply(forecast_table, 1, function(row) {
+                  paste0("<tr><td>", row[1], "</td><td>", row[2], "</td><td>", row[3], "</td><td>", row[4], "</td></tr>")
+                }), collapse = ""),
+                "</tbody>
+        </table>
+      </div>
+      <hr>
+      <p><strong>Total Forecast Change:</strong> ", round(results$total_pct_change, 2), "%</p>
+      <p><strong>Signal:</strong> <span style='font-size: 18px; font-weight: bold;'>", results$signal, "</span></p>
+      <p><strong>Confidence:</strong> ", results$confidence, "</p>
+      <p><strong>Mode:</strong> ", ifelse(results$is_continual, "🔄 Continual Learning", "🆕 From Scratch"), "</p>
+      <p><strong>Training Time:</strong> ", round(results$training_time, 2), " minutes</p>
     "))
   })
+  
+  # ============================================
+  # OUTPUTS - Performance Metrics
+  # ============================================
   
   output$performance_metrics <- renderUI({
     results <- prediction_results()
@@ -805,27 +745,54 @@ observeEvent(input$start_training, {
       <table class='table table-bordered'>
         <tr><th>Metric</th><th>Value</th><th>Rating</th></tr>
         <tr><td>RMSE</td><td>$", format(round(results$test_rmse, 2), big.mark = ","), "</td><td>", 
-            ifelse(results$test_rmse/results$current_price < 0.05, "✓ Excellent", 
-            ifelse(results$test_rmse/results$current_price < 0.10, "○ Good", "✗ Fair")), "</td></tr>
+                ifelse(results$test_rmse/results$current_price < 0.05, "✓ Excellent", 
+                       ifelse(results$test_rmse/results$current_price < 0.10, "○ Good", "✗ Fair")), "</td></tr>
         <tr><td>MAE</td><td>$", format(round(results$test_mae, 2), big.mark = ","), "</td><td>", 
-            ifelse(results$test_mae/results$current_price < 0.03, "✓ Excellent", 
-            ifelse(results$test_mae/results$current_price < 0.06, "○ Good", "✗ Fair")), "</td></tr>
+                ifelse(results$test_mae/results$current_price < 0.03, "✓ Excellent", 
+                       ifelse(results$test_mae/results$current_price < 0.06, "○ Good", "✗ Fair")), "</td></tr>
         <tr><td>MAPE</td><td>", round(results$test_mape, 2), "%</td><td>",
-            ifelse(results$test_mape < 5, "✓ Excellent", 
-            ifelse(results$test_mape < 10, "○ Good", "✗ Fair")), "</td></tr>
+                ifelse(results$test_mape < 5, "✓ Excellent", 
+                       ifelse(results$test_mape < 10, "○ Good", "✗ Fair")), "</td></tr>
         <tr><td>Direction Acc.</td><td>", round(results$direction_accuracy, 2), "%</td><td>",
-            ifelse(results$direction_accuracy > 65, "✓ Excellent", 
-            ifelse(results$direction_accuracy > 55, "○ Good", "✗ Fair")), "</td></tr>
+                ifelse(results$direction_accuracy > 65, "✓ Excellent", 
+                       ifelse(results$direction_accuracy > 55, "○ Good", "✗ Fair")), "</td></tr>
       </table>
-      <p style='margin-top: 10px;'><small><strong>Rating Guide:</strong> ✓ Excellent | ○ Good | ✗ Fair</small></p>
+      <p style='margin-top: 10px;'><small><strong>Rating:</strong> ✓ Excellent | ○ Good | ✗ Fair</small></p>
     "))
   })
   
   # ============================================
-  # OUTPUTS - Plots
+  # OUTPUTS - Forecast Plot
+  # ============================================
   
-  output$prediction_plot <- renderPlotly({
+  output$forecast_plot <- renderPlotly({
     results <- prediction_results()
+    
+    if (is.null(results)) return(NULL)
+    
+    dates <- c(results$latest_date, results$forecast_dates)
+    prices <- c(results$current_price, results$forecast_prices)
+    
+    df <- data.frame(Date = dates, Price = prices)
+    
+    plot_ly(df, x = ~Date, y = ~Price, type = "scatter", mode = "lines+markers",
+            line = list(color = "#28a745", width = 3),
+            marker = list(size = 8, color = "#28a745")) %>%
+      layout(
+        title = paste0(results$n_days, "-Day Price Forecast"),
+        xaxis = list(title = "Date"),
+        yaxis = list(title = "Price (USD)", tickformat = "$,.0f"),
+        hovermode = "x unified"
+      )
+  })
+  
+  # ============================================
+  # OUTPUTS - Test Plot
+  # ============================================
+  
+  output$test_plot <- renderPlotly({
+    results <- prediction_results()
+    
     if (is.null(results) || is.null(results$test_dates)) return(NULL)
     
     df <- data.frame(
@@ -836,49 +803,25 @@ observeEvent(input$start_training, {
     
     plot_ly(df, x = ~Date) %>%
       add_trace(y = ~Actual, name = "Actual", type = "scatter", mode = "lines",
-                line = list(color = "blue", width = 2)) %>%
+                line = list(color = "#2196F3", width = 2)) %>%
       add_trace(y = ~Predicted, name = "Predicted", type = "scatter", mode = "lines",
-                line = list(color = "red", width = 2, dash = "dash")) %>%
+                line = list(color = "#FF5722", width = 2, dash = "dash")) %>%
       layout(
-        title = "Actual vs Predicted Prices (Test Set)",
+        title = "Test Set: Actual vs Predicted",
         xaxis = list(title = "Date"),
-        yaxis = list(title = "Price (USD)"),
+        yaxis = list(title = "Price (USD)", tickformat = "$,.0f"),
         hovermode = "x unified",
-        legend = list(x = 0.1, y = 0.9)
-      )
-  })
-  
-  output$training_plot <- renderPlotly({
-    results <- prediction_results()
-    if (is.null(results) || is.null(results$history)) return(NULL)
-    
-    history <- results$history
-    
-    df <- data.frame(
-      epoch = 1:length(history$metrics$loss),
-      train_loss = history$metrics$loss,
-      val_loss = history$metrics$val_loss
-    )
-    
-    plot_ly(df, x = ~epoch) %>%
-      add_trace(y = ~train_loss, name = "Training Loss", type = "scatter", mode = "lines",
-                line = list(color = "blue")) %>%
-      add_trace(y = ~val_loss, name = "Validation Loss", type = "scatter", mode = "lines",
-                line = list(color = "red")) %>%
-      layout(
-        title = "Model Training History",
-        xaxis = list(title = "Epoch"),
-        yaxis = list(title = "Loss (MAE)", type = "log"),
-        hovermode = "x unified",
-        legend = list(x = 0.7, y = 0.9)
+        legend = list(x = 0.02, y = 0.98)
       )
   })
   
   # ============================================
   # OUTPUTS - Trading Advice
+  # ============================================
   
   output$trading_advice <- renderUI({
     results <- prediction_results()
+    
     if (is.null(results)) {
       return(HTML("<p>Run prediction to get trading advice...</p>"))
     }
@@ -892,105 +835,101 @@ observeEvent(input$start_training, {
     }
     
     advice <- if (grepl("STRONG BUY", results$signal)) {
-      "Strong upward momentum expected. Consider entering a long position. Use stop-loss at -5%."
+      paste0("Strong upward momentum expected over ", results$n_days, " days. Consider entering a long position.")
     } else if (grepl("BUY", results$signal)) {
-      "Moderate upward movement predicted. Small long position recommended. Monitor closely."
+      paste0("Moderate upward trend predicted. Small long position recommended.")
     } else if (grepl("STRONG SELL", results$signal)) {
-      "Strong downward pressure expected. Consider closing long positions. Use stop-loss at +5%."
+      paste0("Strong downward pressure expected. Consider closing long positions.")
     } else if (grepl("SELL", results$signal)) {
-      "Moderate downward movement predicted. Reduce exposure or consider hedging."
+      paste0("Moderate downward trend. Reduce exposure or hedge.")
     } else {
-      "No clear direction. Hold current positions. Wait for stronger signals."
+      paste0("No clear direction. Hold current positions.")
     }
     
     risk_note <- if (results$confidence == "HIGH") {
       "Confidence is HIGH. Model has strong directional accuracy (>70%)."
     } else if (results$confidence == "MODERATE") {
-      "Confidence is MODERATE. Model has reasonable accuracy (60-70%)."
+      "Confidence is MODERATE (60-70%)."
     } else {
-      "Confidence is LOW. Use extra caution. Model accuracy is below 60%."
+      "Confidence is LOW. Use extra caution."
     }
     
     HTML(paste0("
       <div class='alert alert-", signal_color, "'>
-        <h4 class='alert-heading'>", results$signal, "</h4>
+        <h4>", results$signal, "</h4>
         <p>", advice, "</p>
         <hr>
-        <p class='mb-0'><strong>Confidence:</strong> ", risk_note, "</p>
+        <p><strong>Confidence:</strong> ", risk_note, "</p>
+        <p><strong>Forecast Horizon:</strong> ", results$n_days, " days</p>
       </div>
-      <div class='alert alert-danger'>
-        <strong>⚠️ DISCLAIMER:</strong> This is NOT financial advice. Crypto trading is extremely risky. 
-        Do your own research and never invest more than you can afford to lose.
+      <div class='alert alert-danger' style='font-size: 12px;'>
+        <strong>⚠️ DISCLAIMER:</strong> NOT financial advice. For educational purposes only.
       </div>
     "))
   })
   
   # ============================================
-  # OUTPUTS - Tables
+  # OUTPUTS - Training History
+  # ============================================
   
-  output$prediction_table <- renderDT({
+  output$training_plot <- renderPlotly({
     results <- prediction_results()
-    if (is.null(results) || is.null(results$test_dates)) {
-      return(data.frame(Message = "No data available"))
-    }
     
-    if (length(results$test_dates) == 0) {
-      return(data.frame(Message = "No test predictions available (cached model)"))
-    }
+    if (is.null(results) || is.null(results$history)) return(NULL)
+    
+    history <- results$history
     
     df <- data.frame(
-      Date = results$test_dates,
-      Actual = round(results$test_actual, 2),
-      Predicted = round(results$test_pred, 2),
-      Error = round(results$test_pred - results$test_actual, 2),
-      Pct_Error = round((results$test_pred - results$test_actual) / results$test_actual * 100, 2)
+      epoch = 1:length(history$metrics$loss),
+      train_loss = history$metrics$loss,
+      val_loss = history$metrics$val_loss
     )
     
-    if (nrow(df) == 0) {
-      return(data.frame(Message = "No data to display"))
-    }
-    
-    # Simple 2-color scheme (Good vs Bad)
-    datatable(df, 
-              options = list(pageLength = 10, scrollX = TRUE),
-              rownames = FALSE) %>%
-      formatCurrency(c("Actual", "Predicted", "Error"), "$") %>%
-      formatStyle(
-        "Pct_Error",
-        backgroundColor = styleInterval(
-          cuts = 0,  # 1 cut
-          values = c("#f8d7da", "#d4edda")  # 2 colors (negative = red, positive = green)
-        )
+    plot_ly(df, x = ~epoch) %>%
+      add_trace(y = ~train_loss, name = "Training Loss", type = "scatter", mode = "lines",
+                line = list(color = "#2196F3")) %>%
+      add_trace(y = ~val_loss, name = "Validation Loss", type = "scatter", mode = "lines",
+                line = list(color = "#FF5722")) %>%
+      layout(
+        title = "Training History (Latest Run)",
+        xaxis = list(title = "Epoch"),
+        yaxis = list(title = "Loss (MAE)", type = "log"),
+        hovermode = "x unified",
+        legend = list(x = 0.7, y = 0.9)
       )
   })
+  
+  # ============================================
+  # OUTPUTS - Models Table
+  # ============================================
   
   output$models_table <- renderDT({
     model_files <- list.files(MODEL_DIR, pattern = "_metadata.rds$", full.names = TRUE)
     
     if (length(model_files) == 0) {
-      return(data.frame(Message = "No trained models yet. Train a model to get started!"))
+      return(data.frame(Message = "No trained models yet"))
     }
     
     models_info <- lapply(model_files, function(f) {
       meta <- readRDS(f)
       data.frame(
         Cryptocurrency = meta$symbol,
-        Trained = format(meta$trained_date, "%Y-%m-%d %H:%M"),
+        Last_Trained = format(meta$trained_date, "%Y-%m-%d %H:%M"),
         RMSE = round(meta$test_rmse, 2),
-        MAPE = round(meta$test_mape, 2),
-        Direction_Acc = round(meta$direction_accuracy, 2),
-        Status = "Ready"
+        MAPE = paste0(round(meta$test_mape, 2), "%"),
+        Direction_Acc = paste0(round(meta$direction_accuracy, 1), "%"),
+        Total_Epochs = meta$total_epochs_trained
       )
     })
     
     df <- do.call(rbind, models_info)
     
-    datatable(df, options = list(pageLength = 10), rownames = FALSE) %>%
-      formatStyle(
-        "Direction_Acc",
-        backgroundColor = styleInterval(c(55, 65), c("#f8d7da", "#fff3cd", "#d4edda"))
-      )
+    datatable(df, options = list(pageLength = 10), rownames = FALSE)
   })
+  
+  # ============================================
+  # OUTPUTS - Training Log
+  # ============================================
   
   output$training_log <- renderText({
     training_log_text()
@@ -999,5 +938,6 @@ observeEvent(input$start_training, {
 
 # ============================================
 # RUN APP
+# ============================================
 
 shinyApp(ui = ui, server = server)

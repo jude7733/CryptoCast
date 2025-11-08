@@ -1,23 +1,22 @@
 # ============================================
+# CONTINUAL LEARNING LSTM FUNCTIONS
+# ============================================
 
 library(keras3)
+library(tensorflow)
 library(quantmod)
 library(TTR)
 library(dplyr)
 library(ggplot2)
 library(Metrics)
 
-# Set seeds
 set_random_seed(123)
 tensorflow::set_random_seed(123)
 
 # ============================================
-# 1. DATA LOADING AND PREPARATION
+# 1. DATA LOADING
+# ============================================
 
-#' Download cryptocurrency data from Yahoo Finance
-#' @param symbol Crypto symbol (e.g., "BTC-USD")
-#' @param from_date Start date (default "2019-01-01")
-#' @return data.frame with OHLCV data
 get_crypto_data <- function(symbol, from_date = "2019-01-01") {
   tryCatch({
     raw_data <- getSymbols(symbol, src = "yahoo", from = from_date, auto.assign = FALSE)
@@ -41,13 +40,10 @@ get_crypto_data <- function(symbol, from_date = "2019-01-01") {
 
 # ============================================
 # 2. FEATURE ENGINEERING
+# ============================================
 
-#' Add technical indicators to crypto data
-#' @param df Data frame with OHLCV columns
-#' @return Data frame with added features
 add_technical_features <- function(df) {
   
-  # Basic technical indicators
   df$RSI_14 <- RSI(df$Close, n = 14)
   df$RSI_7 <- RSI(df$Close, n = 7)
   
@@ -57,40 +53,33 @@ add_technical_features <- function(df) {
   df$EMA_12 <- EMA(df$Close, n = 12)
   df$EMA_26 <- EMA(df$Close, n = 26)
   
-  # Momentum indicators
   df$ROC_5 <- ROC(df$Close, n = 5, type = "discrete") * 100
   df$ROC_10 <- ROC(df$Close, n = 10, type = "discrete") * 100
   
-  # Price position features (scale-invariant)
   df$Close_to_SMA7 <- (df$Close / df$SMA_7 - 1) * 100
   df$Close_to_SMA20 <- (df$Close / df$SMA_20 - 1) * 100
   df$Close_to_SMA50 <- (df$Close / df$SMA_50 - 1) * 100
   df$SMA_Cross <- (df$SMA_7 / df$SMA_20 - 1) * 100
   
-  # MACD
   macd <- MACD(df$Close, nFast = 12, nSlow = 26, nSig = 9)
   df$MACD <- macd[, "macd"]
   df$MACD_Signal <- macd[, "signal"]
   df$MACD_Hist <- df$MACD - df$MACD_Signal
   
-  # Bollinger Bands
   bb <- BBands(df$Close, n = 20, sd = 2)
   df$BB_pctB <- (df$Close - bb[,"dn"]) / (bb[,"up"] - bb[,"dn"])
   df$BB_width <- (bb[,"up"] - bb[,"dn"]) / df$Close
   
-  # Volatility
   df$Volatility_7 <- rollapply(df$Close, width = 7, 
+                               FUN = function(x) sd(x) / mean(x),
+                               align = "right", fill = NA)
+  df$Volatility_20 <- rollapply(df$Close, width = 20,
                                 FUN = function(x) sd(x) / mean(x),
                                 align = "right", fill = NA)
-  df$Volatility_20 <- rollapply(df$Close, width = 20,
-                                 FUN = function(x) sd(x) / mean(x),
-                                 align = "right", fill = NA)
   
-  # Volume
   df$Volume_SMA <- SMA(df$Volume, n = 20)
   df$Volume_Ratio <- df$Volume / df$Volume_SMA
   
-  # Price changes
   df$Pct_Change_1d <- c(0, diff(df$Close) / df$Close[-length(df$Close)] * 100)
   df$Pct_Change_3d <- c(rep(0, 3), 
                         (df$Close[4:length(df$Close)] - df$Close[1:(length(df$Close)-3)]) /
@@ -98,7 +87,6 @@ add_technical_features <- function(df) {
   
   df$HL_Pct <- (df$High - df$Low) / df$Close * 100
   
-  # Target
   df$Tomorrow_Close <- c(df$Close[-1], NA)
   df$Target_Pct_Change <- ((df$Tomorrow_Close - df$Close) / df$Close) * 100
   
@@ -108,43 +96,34 @@ add_technical_features <- function(df) {
 
 # ============================================
 # 3. DATA PREPROCESSING
+# ============================================
 
-#' Prepare data for LSTM training
-#' @param df Data frame with features
-#' @param feature_cols Vector of feature column names
-#' @param time_steps Lookback period (default 30)
-#' @return List with train/test data and scaling params
 prepare_lstm_data <- function(df, feature_cols, time_steps = 30, test_size = 30) {
   
   feature_data <- as.matrix(df[, feature_cols])
   target_data <- df$Target_Pct_Change
   
-  # Calculate scaling parameters
   scaling_params <- data.frame(
     feature = feature_cols,
     mean = apply(feature_data, 2, mean, na.rm = TRUE),
     sd = apply(feature_data, 2, sd, na.rm = TRUE)
   )
   
-  # Standardize features
   scaled_features <- matrix(0, nrow = nrow(feature_data), ncol = ncol(feature_data))
   for (i in 1:ncol(feature_data)) {
     scaled_features[, i] <- (feature_data[, i] - scaling_params$mean[i]) / 
       (scaling_params$sd[i] + 1e-8)
   }
   
-  # Clip extreme values
   scaled_features[scaled_features > 4] <- 4
   scaled_features[scaled_features < -4] <- -4
   scaled_features[is.na(scaled_features)] <- 0
   scaled_features[is.infinite(scaled_features)] <- 0
   
-  # Normalize target
   target_mean <- mean(target_data, na.rm = TRUE)
   target_sd <- sd(target_data, na.rm = TRUE)
   scaled_target <- (target_data - target_mean) / target_sd
   
-  # Create sequences
   X <- list()
   y <- list()
   
@@ -156,7 +135,6 @@ prepare_lstm_data <- function(df, feature_cols, time_steps = 30, test_size = 30)
   X_full <- array(unlist(X), dim = c(length(X), time_steps, ncol(scaled_features)))
   y_full <- array(unlist(y), dim = c(length(y), 1))
   
-  # Train-test split
   train_size <- dim(X_full)[1] - test_size
   
   X_train <- X_full[1:train_size, , ]
@@ -180,11 +158,8 @@ prepare_lstm_data <- function(df, feature_cols, time_steps = 30, test_size = 30)
 
 # ============================================
 # 4. MODEL BUILDING
+# ============================================
 
-#' Build LSTM model architecture
-#' @param time_steps Lookback period
-#' @param n_features Number of input features
-#' @return Compiled Keras model
 build_lstm_model <- function(time_steps, n_features) {
   
   model <- keras_model_sequential(name = "Crypto_LSTM") %>%
@@ -211,20 +186,24 @@ build_lstm_model <- function(time_steps, n_features) {
 }
 
 # ============================================
-# 5. MODEL TRAINING
+# 5. CONTINUAL LEARNING - Train with fewer epochs
+# ============================================
 
-#' Train LSTM model
-#' @param model Keras model
-#' @param X_train Training features
-#' @param y_train Training targets
-#' @param epochs Maximum epochs (default 150)
-#' @param batch_size Batch size (default 32)
-#' @return Training history
-train_lstm_model <- function(model, X_train, y_train, epochs = 150, batch_size = 32) {
+train_or_continue_model <- function(model = NULL, X_train, y_train, 
+                                    epochs = 50, batch_size = 32, 
+                                    is_continual = FALSE) {
+  
+  # Adjust epochs for continual learning
+  if (is_continual) {
+    epochs <- min(epochs, 30)  # Fewer epochs for fine-tuning
+    message("🔄 Continual learning mode: ", epochs, " epochs")
+  } else {
+    message("🆕 Training from scratch: ", epochs, " epochs")
+  }
   
   early_stop <- callback_early_stopping(
     monitor = 'val_loss',
-    patience = 30,
+    patience = if (is_continual) 10 else 30,
     restore_best_weights = TRUE,
     verbose = 0
   )
@@ -232,7 +211,7 @@ train_lstm_model <- function(model, X_train, y_train, epochs = 150, batch_size =
   reduce_lr <- callback_reduce_lr_on_plateau(
     monitor = 'val_loss',
     factor = 0.5,
-    patience = 12,
+    patience = if (is_continual) 5 else 12,
     min_lr = 0.000001,
     verbose = 0
   )
@@ -250,9 +229,52 @@ train_lstm_model <- function(model, X_train, y_train, epochs = 150, batch_size =
 }
 
 # ============================================
-# 6. PREDICTION AND EVALUATION
+# 6. MULTI-DAY FORECASTING
+# ============================================
 
-#' Calculate directional accuracy
+#' Predict multiple days ahead
+#' @param model Trained model
+#' @param scaled_features Scaled feature matrix
+#' @param time_steps Lookback period
+#' @param n_days Number of days to forecast
+#' @param target_mean Target mean
+#' @param target_sd Target std dev
+#' @param systematic_bias Bias correction
+#' @param current_price Current price
+#' @return Vector of predicted prices
+predict_multi_day <- function(model, scaled_features, time_steps, n_days,
+                              target_mean, target_sd, systematic_bias, current_price) {
+  
+  predictions <- numeric(n_days)
+  current_seq <- tail(scaled_features, time_steps)
+  last_price <- current_price
+  
+  for (day in 1:n_days) {
+    # Predict next day
+    seq_array <- array(current_seq, dim = c(1, time_steps, ncol(scaled_features)))
+    pred_scaled <- model %>% predict(seq_array, verbose = 0)
+    pred_pct <- as.numeric(pred_scaled) * target_sd + target_mean - systematic_bias
+    
+    # Calculate price
+    pred_price <- last_price * (1 + pred_pct / 100)
+    pred_price <- max(last_price * 0.90, min(last_price * 1.10, pred_price))
+    
+    predictions[day] <- pred_price
+    
+    if (day < n_days) {
+      # Shift sequence
+      current_seq <- rbind(current_seq[-1, ], current_seq[time_steps, ])
+      last_price <- pred_price
+    }
+  }
+  
+  return(predictions)
+}
+
+# ============================================
+# 7. EVALUATION
+# ============================================
+
 calculate_direction_accuracy <- function(predicted, actual, current) {
   if (is.null(predicted) || is.null(actual) || is.null(current)) return(50)
   if (length(predicted) < 3 || length(actual) < 3 || length(current) < 3) return(50)
@@ -286,14 +308,8 @@ calculate_direction_accuracy <- function(predicted, actual, current) {
   return(accuracy)
 }
 
-#' Evaluate model performance
-#' @param model Trained Keras model
-#' @param data_prep Prepared data list
-#' @param crypto_df Original crypto data frame
-#' @return List with metrics and predictions
 evaluate_model <- function(model, data_prep, crypto_df) {
   
-  # Unpack data
   X_train <- data_prep$X_train
   y_train <- data_prep$y_train
   X_test <- data_prep$X_test
@@ -303,11 +319,9 @@ evaluate_model <- function(model, data_prep, crypto_df) {
   train_size <- data_prep$train_size
   time_steps <- data_prep$time_steps
   
-  # Predict
   y_pred_scaled <- model %>% predict(X_test, verbose = 0)
   y_pred_pct <- as.vector(y_pred_scaled * target_sd + target_mean)
   
-  # Bias correction
   train_pred_scaled <- model %>% predict(X_train, verbose = 0)
   train_pred_pct <- as.vector(train_pred_scaled * target_sd + target_mean)
   train_actual_pct <- as.vector(y_train * target_sd + target_mean)
@@ -315,7 +329,6 @@ evaluate_model <- function(model, data_prep, crypto_df) {
   
   y_pred_pct_corrected <- y_pred_pct - systematic_bias
   
-  # Get prices
   test_size <- dim(X_test)[1]
   test_start_idx <- train_size + time_steps + 1
   test_end_idx <- min(test_start_idx + test_size - 1, nrow(crypto_df))
@@ -324,17 +337,14 @@ evaluate_model <- function(model, data_prep, crypto_df) {
   test_prices_today <- crypto_df$Close[test_start_idx:test_end_idx]
   test_prices_tomorrow_actual <- crypto_df$Close[(test_start_idx + 1):(test_end_idx + 1)]
   
-  # Ensure equal lengths
   min_len <- min(length(test_prices_today), length(test_prices_tomorrow_actual), length(y_pred_pct_corrected))
   test_prices_today <- test_prices_today[1:min_len]
   test_prices_tomorrow_actual <- test_prices_tomorrow_actual[1:min_len]
   y_pred_pct_corrected <- y_pred_pct_corrected[1:min_len]
   test_dates <- test_dates[1:min_len]
   
-  # Calculate predicted prices
   test_prices_tomorrow_pred <- test_prices_today * (1 + y_pred_pct_corrected / 100)
   
-  # Apply constraints
   for (i in 1:length(test_prices_tomorrow_pred)) {
     if (!is.na(test_prices_today[i]) && !is.na(test_prices_tomorrow_pred[i])) {
       test_prices_tomorrow_pred[i] <- max(test_prices_today[i] * 0.90, 
@@ -342,17 +352,16 @@ evaluate_model <- function(model, data_prep, crypto_df) {
     }
   }
   
-  # Metrics
   valid_indices <- !is.na(test_prices_tomorrow_actual) & !is.na(test_prices_tomorrow_pred)
   
   if (sum(valid_indices) > 3) {
     test_rmse <- sqrt(mean((test_prices_tomorrow_actual[valid_indices] - 
-                             test_prices_tomorrow_pred[valid_indices])^2))
+                              test_prices_tomorrow_pred[valid_indices])^2))
     test_mae <- mean(abs(test_prices_tomorrow_actual[valid_indices] - 
-                          test_prices_tomorrow_pred[valid_indices]))
+                           test_prices_tomorrow_pred[valid_indices]))
     test_mape <- mean(abs((test_prices_tomorrow_actual[valid_indices] - 
-                            test_prices_tomorrow_pred[valid_indices]) / 
-                           test_prices_tomorrow_actual[valid_indices])) * 100
+                             test_prices_tomorrow_pred[valid_indices]) / 
+                            test_prices_tomorrow_actual[valid_indices])) * 100
     
     direction_accuracy <- calculate_direction_accuracy(
       test_prices_tomorrow_pred[valid_indices],
@@ -376,87 +385,10 @@ evaluate_model <- function(model, data_prep, crypto_df) {
   ))
 }
 
-#' Predict tomorrow's price
-#' @param model Trained Keras model
-#' @param data_prep Prepared data list
-#' @param crypto_df Original crypto data frame
-#' @param evaluation Evaluation results
-#' @return List with tomorrow's prediction
-predict_tomorrow <- function(model, data_prep, crypto_df, evaluation) {
-  
-  scaled_features <- data_prep$scaled_features
-  time_steps <- data_prep$time_steps
-  target_mean <- data_prep$target_mean
-  target_sd <- data_prep$target_sd
-  systematic_bias <- evaluation$systematic_bias
-  direction_accuracy <- evaluation$direction_accuracy
-  test_mae <- evaluation$test_mae
-  
-  # Get latest sequence
-  latest_features <- tail(scaled_features, time_steps)
-  latest_sequence <- array(latest_features, dim = c(1, time_steps, ncol(scaled_features)))
-  
-  latest_date <- tail(crypto_df$Date, 1)
-  current_price <- tail(crypto_df$Close, 1)
-  
-  # Predict
-  tomorrow_pct_scaled <- model %>% predict(latest_sequence, verbose = 0)
-  tomorrow_pct_raw <- as.numeric(tomorrow_pct_scaled) * target_sd + target_mean
-  tomorrow_pct_corrected <- tomorrow_pct_raw - systematic_bias
-  
-  tomorrow_price_raw <- current_price * (1 + tomorrow_pct_corrected / 100)
-  tomorrow_price <- max(current_price * 0.90, min(current_price * 1.10, tomorrow_price_raw))
-  
-  price_change <- tomorrow_price - current_price
-  pct_change <- (price_change / current_price) * 100
-  
-  # Confidence
-  confidence <- if (is.na(direction_accuracy)) {
-    "LOW"
-  } else if (direction_accuracy > 70) {
-    "HIGH"
-  } else if (direction_accuracy > 60) {
-    "MODERATE"
-  } else {
-    "LOW"
-  }
-  
-  # Signal
-  signal <- if (abs(pct_change) < 0.5) {
-    "HOLD"
-  } else if (pct_change > 0) {
-    if (pct_change > 3 && confidence == "HIGH") "STRONG BUY" else if (pct_change > 1.5) "BUY" else "WEAK BUY"
-  } else {
-    if (pct_change < -3 && confidence == "HIGH") "STRONG SELL" else if (pct_change < -1.5) "SELL" else "WEAK SELL"
-  }
-  
-  # Bounds
-  lower_bound <- max(tomorrow_price - test_mae, current_price * 0.92)
-  upper_bound <- min(tomorrow_price + test_mae, current_price * 1.08)
-  
-  return(list(
-    latest_date = latest_date,
-    current_price = current_price,
-    tomorrow_price = tomorrow_price,
-    price_change = price_change,
-    pct_change = pct_change,
-    confidence = confidence,
-    signal = signal,
-    lower_bound = lower_bound,
-    upper_bound = upper_bound
-  ))
-}
-
 # ============================================
-# 7. SAVE/LOAD FUNCTIONS
+# 8. SAVE/LOAD
+# ============================================
 
-#' Save trained model and metadata
-#' @param model Keras model
-#' @param data_prep Prepared data
-#' @param evaluation Evaluation results
-#' @param history Training history
-#' @param symbol Crypto symbol
-#' @param output_dir Output directory
 save_crypto_model <- function(model, data_prep, evaluation, history, symbol, output_dir = "models") {
   
   if (!dir.exists(output_dir)) dir.create(output_dir, recursive = TRUE)
@@ -464,7 +396,6 @@ save_crypto_model <- function(model, data_prep, evaluation, history, symbol, out
   model_path <- file.path(output_dir, paste0(symbol, "_model.keras"))
   save_model(model, model_path, overwrite = TRUE)
   
-  # Save metadata
   metadata <- list(
     symbol = symbol,
     trained_date = Sys.time(),
@@ -477,32 +408,32 @@ save_crypto_model <- function(model, data_prep, evaluation, history, symbol, out
     test_mae = evaluation$test_mae,
     test_mape = evaluation$test_mape,
     direction_accuracy = evaluation$direction_accuracy,
-    history = history
+    history = history,
+    total_epochs_trained = length(history$metrics$loss)
   )
   
   metadata_path <- file.path(output_dir, paste0(symbol, "_metadata.rds"))
   saveRDS(metadata, metadata_path)
   
-  message("✓ Model saved to: ", model_path)
-  message("✓ Metadata saved to: ", metadata_path)
+  message("✓ Model saved: ", model_path)
+  message("✓ Metadata saved: ", metadata_path)
 }
 
-#' Load trained model and metadata
-#' @param symbol Crypto symbol
-#' @param model_dir Model directory
-#' @return List with model and metadata
 load_crypto_model <- function(symbol, model_dir = "models") {
   
   model_path <- file.path(model_dir, paste0(symbol, "_model.keras"))
   metadata_path <- file.path(model_dir, paste0(symbol, "_metadata.rds"))
   
-  if (!file(model_path) || !file.exists(metadata_path)) {
+  if (!file.exists(model_path) || !file.exists(metadata_path)) {
     return(NULL)
   }
   
   tryCatch({
     model <- load_model(model_path)
     metadata <- readRDS(metadata_path)
+    
+    message("✓ Loaded model for ", symbol)
+    message("  Last trained: ", format(metadata$trained_date, "%Y-%m-%d %H:%M"))
     
     list(model = model, metadata = metadata)
     
@@ -512,9 +443,9 @@ load_crypto_model <- function(symbol, model_dir = "models") {
   })
 }
 
-
 # ============================================
-# 8. FEATURE COLUMNS (GLOBAL)
+# 9. UTILITY
+# ============================================
 
 get_feature_columns <- function() {
   c("RSI_14", "RSI_7", "Close_to_SMA7", "Close_to_SMA20", "Close_to_SMA50",
@@ -523,5 +454,4 @@ get_feature_columns <- function() {
     "Pct_Change_3d", "HL_Pct")
 }
 
-message("✓ Crypto LSTM functions loaded successfully!")
-
+message("✓ Continual Learning LSTM functions loaded!")
